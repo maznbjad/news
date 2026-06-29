@@ -8,6 +8,7 @@ import streamlit as st
 
 import config
 from core import (
+    analyze_symbol_news,
     article_message,
     daily_openai_status,
     fetch_news,
@@ -212,6 +213,8 @@ st.markdown(
       color:var(--muted)!important;
     }
 
+    .opinion {margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:12px;line-height:1.6;color:#c9d0da!important;}
+
     .metrics {
       display:grid;
       grid-template-columns:repeat(3,1fr);
@@ -281,6 +284,8 @@ def render_card(article: dict) -> str:
         f'<div class="lab">تقييم AI</div>'
         f'</div>'
         f'</div>'
+        f'<div class="opinion"><b>رأي النظام:</b> {html.escape(str(article.get("system_reason") or "لا توجد إشارة واضحة"))}</div>'
+        f'<div class="opinion"><b>رأي AI:</b> {html.escape(str(ai.get("summary") or "لم يتم تشغيل AI"))}</div>'
         f'</a>'
     )
 
@@ -313,8 +318,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-tab_monitor, tab_retrieve, tab_account = st.tabs(
-    ["الرصد", "الاسترجاع", "الحساب"]
+tab_monitor, tab_retrieve, tab_symbol, tab_account = st.tabs(
+    ["الرصد", "الاسترجاع", "تحليل سهم", "الحساب"]
 )
 
 with tab_monitor:
@@ -455,6 +460,40 @@ with tab_retrieve:
     render_results(
         load_json(config.RETRIEVAL_FILE, [])[:100]
     )
+
+with tab_symbol:
+    st.subheader("تحليل سريع لأخبار سهم")
+    symbol = st.text_input("رمز السهم", placeholder="مثال: NTCL").strip().upper()
+    period = st.selectbox("الفترة الزمنية", ["آخر 24 ساعة", "آخر 3 أيام", "آخر أسبوع"], key="symbol_period")
+    hours = {"آخر 24 ساعة":24, "آخر 3 أيام":72, "آخر أسبوع":168}[period]
+    use_ai = st.checkbox("استخدام AI لكل خبر وإنشاء خلاصة نهائية", value=True, key="symbol_ai")
+    if st.button("تحليل أخبار السهم", type="primary", use_container_width=True):
+        if not symbol:
+            st.warning("أدخل رمز السهم")
+        else:
+            try:
+                with st.spinner("جارٍ جمع الأخبار وفلترتها وتحليلها..."):
+                    st.session_state["symbol_analysis_result"] = analyze_symbol_news(symbol, hours, use_ai)
+            except Exception as exc:
+                st.error(str(exc))
+    result = st.session_state.get("symbol_analysis_result")
+    if result:
+        st.markdown(f'<div class="metrics"><div class="metric"><b>{result.get("count",0)}</b><small>إجمالي الأخبار</small></div><div class="metric"><b>{result.get("system_average",0)}</b><small>متوسط النظام</small></div><div class="metric"><b>{result.get("ai_average",0)}</b><small>متوسط AI</small></div></div>', unsafe_allow_html=True)
+        overall = result.get("overall_ai") or {}
+        if overall:
+            st.markdown("### الخلاصة النهائية")
+            st.write(overall.get("summary", ""))
+            st.write(f'**التقييم النهائي:** {overall.get("overall_score", "—")}')
+            st.write(f'**أهم عامل إيجابي:** {overall.get("key_positive", "—")}')
+            st.write(f'**أهم خطر:** {overall.get("key_risk", "—")}')
+            st.info(overall.get("verdict", ""))
+            if st.button("إرسال خلاصة السهم إلى تيليجرام", use_container_width=True):
+                msg=(f'<b>⚡ تحليل سهم {html.escape(result.get("symbol", ""))}</b>\n<b>الفترة:</b> {result.get("hours",0)} ساعة\n<b>عدد الأخبار:</b> {result.get("count",0)}\n<b>متوسط النظام:</b> {result.get("system_average",0)}\n<b>متوسط AI:</b> {result.get("ai_average",0)}\n<b>الخلاصة:</b> {html.escape(str(overall.get("summary", "")))}\n<b>أهم إيجابية:</b> {html.escape(str(overall.get("key_positive", "")))}\n<b>أهم خطر:</b> {html.escape(str(overall.get("key_risk", "")))}\n<b>الرأي النهائي:</b> {html.escape(str(overall.get("verdict", "")))}')
+                ok,text=telegram_send(msg)
+                if ok:st.success(text)
+                else:st.error(text)
+        st.markdown("### الأخبار المجمعة")
+        render_results(result.get("articles", []))
 
 with tab_account:
     account = load_account()
