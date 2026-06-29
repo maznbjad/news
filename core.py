@@ -105,13 +105,29 @@ def telegram_send(text):
  try:d=r.json()
  except:d={}
  return (True,'تم الإرسال') if r.ok and d.get('ok') else (False,str(d.get('description') or r.text[:300]))
-def article_message(a):
- ai=a.get('ai') or {};sy=' • '.join(a.get('tickers') or ['—']);url=a.get('url') or '';link=f'\n<a href="{escape(url)}">فتح الخبر</a>' if url else ''
- return (f'<b>⚡ برق نيوز</b>\n<b>{escape(sy)}</b>\n<b>وقت الخبر:</b> {format_saudi_time(a.get("published"))}\n'
-         f'<b>تقييم النظام:</b> {a.get("system_score",0)}\n<b>رأي النظام:</b> {escape(str(a.get("system_reason") or "لا توجد إشارة واضحة"))}\n'
-         f'<b>تقييم AI:</b> {ai.get("score","—")}\n<b>رأي AI:</b> {escape(str(ai.get("summary") or "لم يتم تحليل AI"))}\n'
-         f'<b>سبب AI:</b> {escape(str(ai.get("reason") or "—"))}\n<b>سكويز:</b> {ai.get("squeeze_score","—")}\n'
-         f'<b>خطر التخفيف:</b> {ai.get("dilution_risk","—")}\n<b>{escape(str(a.get("title","")))}</b>{link}')
+def article_message(article):
+    ai = article.get("ai") or {}
+    symbols = " • ".join(article.get("tickers") or ["—"])
+    url = article.get("url") or ""
+    link = f'\n<a href="{escape(url)}">فتح الخبر</a>' if url else ""
+    published_time = format_saudi_time(article.get("published") or article.get("published_display"))
+    system_reason = escape(str(article.get("system_reason") or "لا توجد إشارة واضحة"))
+    ai_summary = escape(str(ai.get("summary") or "لم يتم تشغيل تحليل AI"))
+    ai_reason = escape(str(ai.get("reason") or "لا يوجد سبب متاح"))
+
+    return (
+        f"<b>⚡ برق نيوز</b>\n"
+        f"<b>{escape(symbols)}</b>\n"
+        f"<b>وقت الخبر:</b> {published_time}\n"
+        f"<b>تقييم النظام:</b> {article.get('system_score', 0)}\n"
+        f"<b>رأي النظام:</b> {system_reason}\n"
+        f"<b>تقييم AI:</b> {ai.get('score', '—')}\n"
+        f"<b>رأي AI:</b> {ai_summary}\n"
+        f"<b>سبب AI:</b> {ai_reason}\n"
+        f"<b>{escape(str(article.get('title', '')))}</b>"
+        f"{link}"
+    )
+
 def is_positive(a):
  ai=a.get('ai') or {};s=ai.get('sentiment')
  if s in ('negative','mixed'):return False
@@ -148,31 +164,53 @@ def daily_openai_status():
   else:z['message']=f'OpenAI HTTP {r.status_code}'
  except Exception as e:z['message']=f'تعذر الفحص: {e}'
  return z
+def analyze_symbol_news(symbol, hours=168, ai_enabled=True):
+    symbol = str(symbol or "").strip().upper().replace("$", "")
+    if not symbol:
+        raise ValueError("أدخل رمز سهم صحيح.")
 
+    raw_items = fetch_news(hours=hours, limit=config.NEWS_LIMIT)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    articles = []
 
-def analyze_symbol_news(symbol,hours=168,ai_enabled=True):
- symbol=str(symbol or '').strip().upper().replace('$','')
- if not symbol:raise ValueError('أدخل رمز سهم صحيح')
- raw=fetch_news(hours=hours,limit=config.NEWS_LIMIT);cut=datetime.now(timezone.utc)-timedelta(hours=hours);arts=[]
- for i in raw:
-  a=normalize(i);pt=parse_time(a.get('published',''))
-  if pt and pt<cut:continue
-  if symbol not in set(a.get('tickers') or []):continue
-  if ai_enabled:
-   try:a['ai']=ai_analyze(a)
-   except Exception as e:a['ai']={'score':0,'sentiment':'error','summary':'تعذر تحليل AI','reason':str(e),'squeeze_score':0,'dilution_risk':0,'cost_usd':0.0}
-  arts.append(a)
- arts=sorted(arts,key=lambda x:x.get('published',''),reverse=True)
- ss=[int(x.get('system_score',0)) for x in arts]
- ais=[int((x.get('ai') or {}).get('score',0)) for x in arts if isinstance((x.get('ai') or {}).get('score'),int)]
- result={'symbol':symbol,'hours':hours,'articles':arts,'count':len(arts),'system_average':round(sum(ss)/len(ss),1) if ss else 0,'ai_average':round(sum(ais)/len(ais),1) if ais else 0,'overall_ai':None}
- if ai_enabled and arts and config.OPENAI_API_KEY:
-  compact=[{'time':format_saudi_time(a.get('published')),'title':a.get('title'),'system_score':a.get('system_score'),'system_reason':a.get('system_reason'),'ai_score':(a.get('ai') or {}).get('score'),'ai_summary':(a.get('ai') or {}).get('summary'),'ai_reason':(a.get('ai') or {}).get('reason')} for a in arts[:20]]
-  prompt=('حلل مجمل أخبار السهم '+symbol+' خلال آخر '+str(hours)+' ساعة. أعد JSON فقط: '
-          '{"overall_score": عدد من -100 إلى 100, "sentiment":"positive|negative|neutral|mixed", '
-          '"summary":"خلاصة عربية قصيرة", "key_positive":"أهم عامل إيجابي", '
-          '"key_risk":"أهم خطر", "verdict":"رأي نهائي مختصر وغير توصية مالية"}\nالأخبار:'
-          +json.dumps(compact,ensure_ascii=False))
-  r=requests.post(config.OPENAI_URL,headers={'Authorization':f'Bearer {config.OPENAI_API_KEY}','Content-Type':'application/json'},json={'model':config.OPENAI_MODEL,'input':prompt,'temperature':0.1},timeout=60)
-  r.raise_for_status();d=r.json();result['overall_ai']=parse_obj(response_text(d))
- return result
+    for raw in raw_items:
+        article = normalize_article(raw)
+        if symbol not in set(article.get("tickers") or []):
+            continue
+
+        published = parse_time(article.get("published", ""))
+        if published and published < cutoff:
+            continue
+
+        if ai_enabled:
+            try:
+                article["ai"] = ai_analyze(article)
+            except Exception as exc:
+                article["ai"] = {
+                    "score": 0,
+                    "sentiment": "error",
+                    "summary": "تعذر تحليل AI",
+                    "reason": str(exc),
+                    "squeeze_score": 0,
+                    "dilution_risk": 0,
+                    "cost_usd": 0.0,
+                }
+
+        articles.append(article)
+
+    articles.sort(key=lambda x: x.get("published", ""), reverse=True)
+    system_scores = [int(x.get("system_score", 0)) for x in articles]
+    ai_scores = [
+        int((x.get("ai") or {}).get("score", 0))
+        for x in articles
+        if isinstance((x.get("ai") or {}).get("score"), int)
+    ]
+
+    return {
+        "symbol": symbol,
+        "hours": hours,
+        "count": len(articles),
+        "articles": articles,
+        "system_average": round(sum(system_scores) / len(system_scores), 1) if system_scores else 0,
+        "ai_average": round(sum(ai_scores) / len(ai_scores), 1) if ai_scores else 0,
+    }
