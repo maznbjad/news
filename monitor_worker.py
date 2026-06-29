@@ -22,6 +22,39 @@ def daily():
  if a.get('last_daily_report')==today:return
  s=daily_openai_status();msg=f'<b>⚡ تقرير برق نيوز اليومي</b>\n<b>حالة OpenAI:</b> {s["message"]}\n<b>مصروف اليوم:</b> ${s["today_cost"]:.4f}\n<b>مصروف الأسبوع:</b> ${s["week_cost"]:.4f}\n<b>المتبقي التقديري:</b> ${s["estimated_remaining"]:.4f}\n<i>المتبقي تقديري حسب الرصيد المدخل، وليس رصيد OpenAI الرسمي.</i>'
  telegram_send(msg);a['last_daily_report']=today;save_account(a)
+
+def send_heartbeat_if_needed():
+    status = load_json(config.STATUS_FILE, {})
+    now = datetime.now(RIYADH)
+    last_value = status.get("last_heartbeat")
+    last_heartbeat = None
+
+    if last_value:
+        try:
+            last_heartbeat = datetime.fromisoformat(last_value)
+            if last_heartbeat.tzinfo is None:
+                last_heartbeat = last_heartbeat.replace(tzinfo=RIYADH)
+        except Exception:
+            last_heartbeat = None
+
+    if last_heartbeat and (now - last_heartbeat).total_seconds() < 1800:
+        return
+
+    message = (
+        "<b>⚡ برق نيوز</b>\n"
+        "<b>✅ الرصد ما زال يعمل</b>\n"
+        f"<b>الوقت:</b> {format_saudi_time(now)}\n"
+        f"<b>آخر فحص:</b> {format_saudi_time(status.get('last_check'))}\n"
+        f"<b>الأخبار المفحوصة:</b> {status.get('last_fetched', 0)}\n"
+        f"<b>الإشعارات المرسلة:</b> {status.get('last_sent', 0)}"
+    )
+
+    ok, _ = telegram_send(message)
+    if ok:
+        status["last_heartbeat"] = now.isoformat()
+        save_json(config.STATUS_FILE, status)
+
+
 def run():
  if not lock():return
  status(worker_alive=True,monitoring=False,message='عامل الرصد يعمل')
