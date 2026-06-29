@@ -1,0 +1,38 @@
+MASSIVE_API_KEY = "mJCTSFzMQ1Gf8igHUGrKAun6GA4xP_Mq"
+TELEGRAM_BOT_TOKEN = "8831935365:AAEYl7vtj6UnEQgvW1TIuEvB4QB5yTv8Iko"
+TELEGRAM_CHAT_ID = "849742381"
+OPENAI_API_KEY = "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"
+
+
+
+
+
+
+
+
+
+
+streamlit run app.py
+
+
+BOT_TOKEN = "          "
+CHAT_ID = "    849742381    "
+MASSIVE_API_KEY = "        "
+
+
+
+
+API_KEY = "mJCTSFzMQ1Gf8igHUGrKAun6GA4xP_Mq"     # مفتاح Massive
+MASSIVE_API_KEY = ""                               # اختياري: اتركه فاضي إذا استخدمت API_KEY فوق
+TELEGRAM_BOT_TOKEN = "8831935365:AAEYl7vtj6UnEQgvW1TIuEvB4QB5yTv8Iko"
+TELEGRAM_CHAT_ID = "849742381"
+
+
+
+
+
+FLOW_PERIOD = "INTRADAY_PERIOD"
+FLOW_INTERVAL = "5d"
+
+DAILY_PERIOD = "120d"
+DAILY_INTERVAL = "1d"
