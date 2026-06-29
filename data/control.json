@@ -1,1 +1,6 @@
-{"enabled": false, "positive_only": true, "ai_enabled": true}
+{
+  "enabled": false,
+  "positive_only": true,
+  "ai_enabled": true,
+  "updated_at": ""
+}
