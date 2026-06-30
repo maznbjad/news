@@ -567,6 +567,91 @@ def system_analyze(title: str, teaser: str) -> dict[str, Any]:
     }
 
 
+
+SYSTEM_OPINION_EMPTY_VALUES = {
+    "",
+    "—",
+    "-",
+    "غير متاح",
+    "غير متوفر",
+    "لا يوجد",
+    "none",
+    "null",
+}
+
+
+def ensure_system_analysis(
+    article: dict[str, Any],
+) -> dict[str, Any]:
+    """يعيد بناء تحليل النظام لأي خبر قديم أو ناقص البيانات."""
+    current_reason = str(
+        article.get("system_reason")
+        or article.get("system_opinion")
+        or ""
+    ).strip()
+
+    reason_is_missing = (
+        current_reason.lower()
+        in SYSTEM_OPINION_EMPTY_VALUES
+    )
+
+    required_missing = any(
+        key not in article
+        for key in (
+            "system_score",
+            "system_sentiment",
+            "event_status",
+            "confidence_score",
+            "confidence_label",
+            "alert_level",
+        )
+    )
+
+    if not reason_is_missing and not required_missing:
+        return article
+
+    analysis = system_analyze(
+        clean_text(article.get("title")),
+        clean_text(
+            article.get("teaser")
+            or article.get("body")
+            or article.get("description")
+        ),
+    )
+
+    article["system_score"] = int(
+        analysis.get("score", article.get("system_score", 0))
+    )
+    article["system_sentiment"] = analysis.get(
+        "sentiment",
+        article.get("system_sentiment", "neutral"),
+    )
+    article["system_reason"] = analysis.get(
+        "reason",
+        "لا توجد إشارة آلية قوية",
+    )
+    article["event_status"] = analysis.get(
+        "event_status",
+        article.get("event_status", "غير مصنف"),
+    )
+    article["confidence_score"] = int(
+        analysis.get(
+            "confidence_score",
+            article.get("confidence_score", 0),
+        )
+    )
+    article["confidence_label"] = analysis.get(
+        "confidence_label",
+        article.get("confidence_label", "منخفضة"),
+    )
+    article["alert_level"] = analysis.get(
+        "alert_level",
+        article.get("alert_level", "منخفض"),
+    )
+
+    return article
+
+
 def normalize_article(item: dict[str, Any]) -> dict[str, Any]:
     title = clean_text(item.get("title"))
     teaser = clean_text(item.get("teaser") or item.get("body"))
@@ -584,7 +669,7 @@ def normalize_article(item: dict[str, Any]) -> dict[str, Any]:
         or f"{published}:{title}"
     )
 
-    return {
+    article = {
         "id": article_id,
         "title": title or "خبر بلا عنوان",
         "teaser": teaser,
@@ -605,6 +690,8 @@ def normalize_article(item: dict[str, Any]) -> dict[str, Any]:
         "confidence_label": analysis.get("confidence_label", "منخفضة"),
         "alert_level": analysis.get("alert_level", "منخفض"),
     }
+
+    return ensure_system_analysis(article)
 
 
 # Alias يحمي من أخطاء الاسم القديمة.
@@ -1083,6 +1170,8 @@ def record_signal(
     article: dict[str, Any],
     price_map: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
+    article = ensure_system_analysis(dict(article))
+
     if not should_track_signal(article):
         return []
 
@@ -1339,6 +1428,7 @@ def update_signal_outcomes(
 
 
 def article_message(article: dict[str, Any]) -> str:
+    article = ensure_system_analysis(dict(article))
     ai = article.get("ai") or {}
     symbols = " • ".join(article.get("tickers") or ["—"])
     url = article.get("url") or ""
@@ -1449,7 +1539,7 @@ def process_articles(
     output: list[dict[str, Any]] = []
 
     for raw in raw_items:
-        article = normalize_article(raw)
+        article = ensure_system_analysis(normalize_article(raw))
 
         if watchlist_only:
             matched = sorted(
@@ -1511,7 +1601,7 @@ def analyze_symbol_news(
     articles: list[dict[str, Any]] = []
 
     for raw in raw_items:
-        article = normalize_article(raw)
+        article = ensure_system_analysis(normalize_article(raw))
         if symbol not in set(article.get("tickers") or []):
             continue
 

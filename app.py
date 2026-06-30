@@ -12,6 +12,7 @@ from core import (
     analyze_symbol_news,
     article_message,
     daily_openai_status,
+    ensure_system_analysis,
     fetch_news,
     format_saudi_time,
     is_positive,
@@ -316,6 +317,7 @@ st.markdown(
 
 
 def render_card(article: dict) -> str:
+    article = ensure_system_analysis(dict(article))
     ai = article.get("ai") or {}
     sentiment = str(
         ai.get("sentiment")
@@ -410,6 +412,28 @@ def render_results(items: list[dict], max_items: int = 150) -> None:
 
 
 def render_signal(record: dict) -> str:
+    if str(record.get("system_opinion") or "").strip().lower() in {
+        "",
+        "—",
+        "غير متاح",
+        "غير متوفر",
+        "none",
+        "null",
+    }:
+        repaired = ensure_system_analysis(
+            {
+                "title": record.get("title"),
+                "teaser": record.get("teaser", ""),
+                "system_score": record.get("system_score", 0),
+            }
+        )
+        record = dict(record)
+        record["system_opinion"] = repaired.get("system_reason")
+        record["event_status"] = repaired.get("event_status")
+        record["confidence_score"] = repaired.get("confidence_score")
+        record["confidence_label"] = repaired.get("confidence_label")
+        record["alert_level"] = repaired.get("alert_level")
+
     initial = record.get("price_at_signal")
     latest = record.get("latest_price")
     highest = record.get("highest_change_pct")

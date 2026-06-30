@@ -1,49 +1,11 @@
-# القيم اليدوية للتشغيل المحلي.
+from pathlib import Path
+
 MASSIVE_API_KEY = "mJCTSFzMQ1Gf8igHUGrKAun6GA4xP_Mq"
 TELEGRAM_BOT_TOKEN = "8831935365:AAEYl7vtj6UnEQgvW1TIuEvB4QB5yTv8Iko"
 TELEGRAM_CHAT_ID = "849742381"
-OPENAI_API_KEY = "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"
+OPENAI_API_KEY = "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"
 
 
-
-
-
-import os
-from pathlib import Path
-
-
-def _resolve_secret(name: str, manual_value: str = "") -> str:
-    """الأولوية: Streamlit Secrets ثم متغيرات البيئة ثم القيمة اليدوية."""
-    streamlit_value = ""
-
-    try:
-        import streamlit as st
-        streamlit_value = str(st.secrets.get(name, "") or "").strip()
-    except Exception:
-        streamlit_value = ""
-
-    environment_value = str(os.getenv(name, "") or "").strip()
-    manual_value = str(manual_value or "").strip()
-
-    return streamlit_value or environment_value or manual_value
-
-
-MASSIVE_API_KEY = _resolve_secret(
-    "MASSIVE_API_KEY",
-    MASSIVE_API_KEY,
-)
-TELEGRAM_BOT_TOKEN = _resolve_secret(
-    "TELEGRAM_BOT_TOKEN",
-    TELEGRAM_BOT_TOKEN,
-)
-TELEGRAM_CHAT_ID = _resolve_secret(
-    "TELEGRAM_CHAT_ID",
-    TELEGRAM_CHAT_ID,
-)
-OPENAI_API_KEY = _resolve_secret(
-    "OPENAI_API_KEY",
-    OPENAI_API_KEY,
-)
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"

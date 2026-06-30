@@ -1,19 +1,7 @@
 {
   "worker_alive": true,
-  "monitoring": true,
-  "message": "الرصد يعمل.",
+  "monitoring": false,
+  "message": "الرصد متوقف.",
   "worker_pid": 24504,
-  "updated_at": "2026-06-30T19:48:56.276279+03:00",
-  "last_check": "2026-06-30T19:48:56.275903+03:00",
-  "last_raw_fetched": 105,
-  "last_fetched": 21,
-  "last_sent": 0,
-  "last_outcome_update": "2026-06-30T19:40:48.876694+03:00",
-  "last_outcome_records": 0,
-  "last_outcome_tickers": 0,
-  "last_outcome_errors": [
-    "EHGO: 403 Client Error: Forbidden for url: https://api.massive.com/v2/snapshot/locale/us/markets/stocks/tickers/EHGO",
-    "GMAB: 403 Client Error: Forbidden for url: https://api.massive.com/v2/snapshot/locale/us/markets/stocks/tickers/GMAB"
-  ],
-  "last_heartbeat": "2026-06-30T19:40:53.331965+03:00"
+  "updated_at": "2026-06-30T20:14:09.723210+03:00"
 }

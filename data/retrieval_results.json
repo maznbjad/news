@@ -33,15 +33,14 @@
     "confidence_label": "متوسطة",
     "alert_level": "متوسط",
     "ai": {
-      "available": false,
-      "score": null,
-      "sentiment": "error",
-      "summary": "تحليل AI غير متاح",
-      "reason": "مفتاح OpenAI غير صالح أو غير مصرح له. تحقق من Streamlit Secrets ثم أعد تشغيل التطبيق.",
-      "squeeze_score": null,
-      "dilution_risk": null,
-      "cost_usd": 0.0,
-      "error_code": "unauthorized"
+      "score": 60,
+      "sentiment": "positive",
+      "summary": "نجاح المرحلة الثالثة في تجربة علاج اللمفوما يعزز فرص التوسع السوقي لشركة Genmab.",
+      "reason": "النتائج الإيجابية في المرحلة الثالثة تمثل محفزًا قويًا للنمو، مع فرص لتوسيع الترخيص السوقي، لكن لا توجد معلومات عن طرح أسهم جديدة أو مخاطر تخفيف كبيرة، كما أن خطر الشطب أو التجزئة العكسية غير وارد، والحدث قد يكون مسعرًا جزئيًا مع احتمال سكويز متوسط.",
+      "squeeze_score": 40,
+      "dilution_risk": 20,
+      "available": true,
+      "cost_usd": 0.0003468
     },
     "tracking": {
       "signal_id": "60194952:GMAB",
@@ -50,7 +49,7 @@
       "title": "Genmab/AbbVie Lymphoma Trial Meets Main Goal, Analyst Eyes Bigger Market Opportunity",
       "url": "https://www.benzinga.com/news/health-care/26/06/60194952/genmab-abbvie-lymphoma-trial-meets-main-goal-analyst-eyes-bigger-market-opportunity",
       "published": "2026-06-30T16:31:46Z",
-      "detected_at": "2026-06-30T19:40:48.802334+03:00",
+      "detected_at": "2026-06-30T20:09:45.971592+03:00",
       "signal_sentiment": "positive",
       "system_score": 75,
       "system_opinion": "مرحلة ثالثة",

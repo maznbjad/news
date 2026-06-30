@@ -1,1 +1,16 @@
-[]
+[
+  {
+    "time": "2026-06-30T20:12:22.032648+03:00",
+    "item_id": "article:60194952",
+    "input_tokens": 271,
+    "output_tokens": 149,
+    "cost_usd": 0.0003468
+  },
+  {
+    "time": "2026-06-30T20:12:27.449468+03:00",
+    "item_id": "article:60192576",
+    "input_tokens": 292,
+    "output_tokens": 129,
+    "cost_usd": 0.0003232
+  }
+]
