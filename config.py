@@ -1,9 +1,9 @@
 from pathlib import Path
 
 MASSIVE_API_KEY = ""
-TELEGRAM_BOT_TOKEN = "8"
+TELEGRAM_BOT_TOKEN = ""
 TELEGRAM_CHAT_ID = ""
-OPENAI_API_KEY = "sk-proj--"
+OPENAI_API_KEY = ""
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
