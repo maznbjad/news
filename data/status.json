@@ -1,10 +1,10 @@
 {
   "worker_alive": true,
   "monitoring": true,
-  "message": "جارٍ فحص الأخبار...",
+  "message": "الرصد يعمل.",
   "worker_pid": 24504,
-  "updated_at": "2026-06-30T19:48:52.703635+03:00",
-  "last_check": "2026-06-30T19:48:22.679762+03:00",
+  "updated_at": "2026-06-30T19:48:56.276279+03:00",
+  "last_check": "2026-06-30T19:48:56.275903+03:00",
   "last_raw_fetched": 105,
   "last_fetched": 21,
   "last_sent": 0,
