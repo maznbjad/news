@@ -20,9 +20,6 @@ POSITIVE_RULES = [
     ("approved by the fda", 95, "اعتماد FDA"),
     ("fda clearance", 85, "تصريح FDA"),
     ("510(k) clearance", 82, "تصريح 510(k)"),
-    ("acquisition", 85, "استحواذ"),
-    ("to be acquired", 90, "اتفاق استحواذ"),
-    ("merger agreement", 82, "اتفاق اندماج"),
     ("strategic partnership", 65, "شراكة استراتيجية"),
     ("partnership", 48, "شراكة"),
     ("awarded contract", 75, "عقد جديد"),
@@ -241,14 +238,280 @@ def format_saudi_time(value: Any) -> str:
     )
 
 
+
+UNCERTAIN_EVENT_TERMS = [
+    "proposed",
+    "proposal",
+    "non-binding",
+    "nonbinding",
+    "unsolicited",
+    "considering",
+    "exploring",
+    "potential",
+    "possible",
+    "in talks",
+    "reportedly",
+    "rumor",
+    "rumoured",
+    "may acquire",
+    "seeking to acquire",
+]
+
+ACQUISITION_TERMS = [
+    "acquisition",
+    "acquire",
+    "acquired",
+    "takeover",
+    "merger",
+    "buyout",
+    "purchase offer",
+]
+
+
+def confidence_label(score: int) -> str:
+    if score >= 80:
+        return "عالية"
+    if score >= 55:
+        return "متوسطة"
+    return "منخفضة"
+
+
+def classify_acquisition_event(text: str) -> dict[str, Any] | None:
+    combined = str(text or "").lower()
+
+    if not any(term in combined for term in ACQUISITION_TERMS):
+        return None
+
+    cancelled_terms = [
+        "withdraws offer",
+        "withdrawn offer",
+        "terminates merger",
+        "terminated merger",
+        "deal terminated",
+        "rejects offer",
+        "rejected offer",
+        "rejects acquisition",
+        "rejected acquisition",
+        "rejects takeover",
+        "rejected takeover",
+        "rejects proposed",
+        "declines offer",
+        "abandons acquisition",
+        "acquisition cancelled",
+        "acquisition canceled",
+    ]
+    completed_terms = [
+        "completes acquisition",
+        "completed acquisition",
+        "closes acquisition",
+        "closed acquisition",
+        "completion of acquisition",
+        "merger completed",
+        "transaction completed",
+        "deal closed",
+        "consummated",
+    ]
+    definitive_terms = [
+        "definitive agreement",
+        "entered into an agreement",
+        "agreed to acquire",
+        "agreement to acquire",
+        "signed merger agreement",
+        "binding agreement",
+    ]
+    approved_terms = [
+        "board approves",
+        "board approved",
+        "shareholders approve",
+        "shareholder approval",
+        "accepts offer",
+        "accepted offer",
+        "recommends the offer",
+    ]
+    review_terms = [
+        "board confirms proposed",
+        "board receives proposal",
+        "reviewing the proposal",
+        "evaluating the proposal",
+        "considering the proposal",
+        "special committee",
+        "strategic alternatives",
+    ]
+
+    if any(term in combined for term in cancelled_terms):
+        return {
+            "score": -72,
+            "sentiment": "negative",
+            "reason": "إلغاء أو رفض صفقة استحواذ",
+            "event_status": "ملغى أو مرفوض",
+            "confidence_score": 92,
+            "alert_level": "سلبي مؤكد",
+        }
+
+    if any(term in combined for term in completed_terms):
+        return {
+            "score": 96,
+            "sentiment": "positive",
+            "reason": "إتمام صفقة الاستحواذ",
+            "event_status": "مكتمل",
+            "confidence_score": 96,
+            "alert_level": "مؤكد",
+        }
+
+    if any(term in combined for term in definitive_terms):
+        return {
+            "score": 90,
+            "sentiment": "positive",
+            "reason": "اتفاق استحواذ نهائي وموقّع",
+            "event_status": "اتفاق نهائي",
+            "confidence_score": 92,
+            "alert_level": "مؤكد",
+        }
+
+    if any(term in combined for term in approved_terms):
+        return {
+            "score": 82,
+            "sentiment": "positive",
+            "reason": "موافقة رسمية على عرض أو صفقة استحواذ",
+            "event_status": "موافق عليه",
+            "confidence_score": 86,
+            "alert_level": "قوي",
+        }
+
+    if any(term in combined for term in review_terms):
+        return {
+            "score": 55,
+            "sentiment": "positive",
+            "reason": "عرض استحواذ قيد المراجعة ولم يصبح اتفاقًا نهائيًا",
+            "event_status": "قيد المراجعة",
+            "confidence_score": 58,
+            "alert_level": "مبدئي",
+        }
+
+    if any(term in combined for term in UNCERTAIN_EVENT_TERMS):
+        return {
+            "score": 48,
+            "sentiment": "positive",
+            "reason": "عرض أو احتمال استحواذ غير نهائي",
+            "event_status": "مقترح غير نهائي",
+            "confidence_score": 48,
+            "alert_level": "مبدئي",
+        }
+
+    return {
+        "score": 68,
+        "sentiment": "positive",
+        "reason": "خبر استحواذ دون دليل كافٍ على الإتمام النهائي",
+        "event_status": "استحواذ معلن",
+        "confidence_score": 65,
+        "alert_level": "متوسط",
+    }
+
+
+def default_event_metadata(
+    score: int,
+    sentiment: str,
+    combined: str,
+) -> dict[str, Any]:
+    uncertain = any(term in combined for term in UNCERTAIN_EVENT_TERMS)
+    absolute_score = abs(int(score))
+
+    if uncertain:
+        confidence_score = min(50, max(30, absolute_score))
+        event_status = "مبدئي أو غير مؤكد"
+        alert_level = "مبدئي"
+    elif absolute_score >= 80:
+        confidence_score = 84
+        event_status = "خبر واضح"
+        alert_level = "قوي"
+    elif absolute_score >= 55:
+        confidence_score = 68
+        event_status = "خبر متوسط الوضوح"
+        alert_level = "متوسط"
+    elif absolute_score > 0:
+        confidence_score = 50
+        event_status = "خبر يحتاج تحقق"
+        alert_level = "مبدئي"
+    else:
+        confidence_score = 25
+        event_status = "غير مصنف"
+        alert_level = "منخفض"
+
+    return {
+        "event_status": event_status,
+        "confidence_score": confidence_score,
+        "confidence_label": confidence_label(confidence_score),
+        "alert_level": alert_level,
+    }
+
+
+def ai_unavailable_result(
+    reason: str,
+    error_code: str = "unavailable",
+) -> dict[str, Any]:
+    return {
+        "available": False,
+        "score": None,
+        "sentiment": "error",
+        "summary": "تحليل AI غير متاح",
+        "reason": str(reason or "تعذر تشغيل تحليل AI"),
+        "squeeze_score": None,
+        "dilution_risk": None,
+        "cost_usd": 0.0,
+        "error_code": error_code,
+    }
+
+
+def ai_error_from_response(response: requests.Response) -> dict[str, Any]:
+    detail = ""
+
+    try:
+        error = response.json().get("error", {})
+        detail = str(error.get("message") or "")
+        api_code = str(error.get("code") or error.get("type") or "")
+    except Exception:
+        detail = response.text[:300]
+        api_code = ""
+
+    if response.status_code == 401:
+        return ai_unavailable_result(
+            "مفتاح OpenAI غير صالح أو غير مصرح له. "
+            "تحقق من Streamlit Secrets ثم أعد تشغيل التطبيق.",
+            "unauthorized",
+        )
+
+    if response.status_code == 429:
+        return ai_unavailable_result(
+            "الرصيد غير كافٍ أو تم تجاوز حد استخدام OpenAI."
+            + (f" ({detail})" if detail else ""),
+            api_code or "rate_or_quota",
+        )
+
+    return ai_unavailable_result(
+        f"تعذر اتصال OpenAI: HTTP {response.status_code}"
+        + (f" — {detail}" if detail else ""),
+        api_code or f"http_{response.status_code}",
+    )
+
+
+
 def system_analyze(title: str, teaser: str) -> dict[str, Any]:
     combined = f"{title} {teaser}".lower()
 
+    acquisition = classify_acquisition_event(combined)
+    if acquisition:
+        acquisition["confidence_label"] = confidence_label(
+            int(acquisition["confidence_score"])
+        )
+        return acquisition
+
     if any(pattern in combined for pattern in NOISE_PATTERNS):
+        metadata = default_event_metadata(0, "neutral", combined)
         return {
             "score": 0,
             "sentiment": "neutral",
             "reason": "خبر تجميعي أو منخفض الأهمية",
+            **metadata,
         }
 
     matches = []
@@ -257,10 +520,12 @@ def system_analyze(title: str, teaser: str) -> dict[str, Any]:
             matches.append((score, reason))
 
     if not matches:
+        metadata = default_event_metadata(0, "neutral", combined)
         return {
             "score": 0,
             "sentiment": "neutral",
             "reason": "لا توجد إشارة آلية قوية",
+            **metadata,
         }
 
     strongest_score = max(matches, key=lambda item: abs(item[0]))[0]
@@ -274,10 +539,31 @@ def system_analyze(title: str, teaser: str) -> dict[str, Any]:
         if reason not in reasons:
             reasons.append(reason)
 
+    # الكلمات غير المؤكدة تمنع رفع الخبر كفرصة قوية.
+    if any(term in combined for term in UNCERTAIN_EVENT_TERMS):
+        if strongest_score > 55:
+            strongest_score = 55
+        elif strongest_score < -55:
+            strongest_score = -55
+
+    sentiment = (
+        "positive"
+        if strongest_score > 0
+        else "negative"
+        if strongest_score < 0
+        else "neutral"
+    )
+    metadata = default_event_metadata(
+        strongest_score,
+        sentiment,
+        combined,
+    )
+
     return {
         "score": strongest_score,
-        "sentiment": "positive" if strongest_score > 0 else "negative",
+        "sentiment": sentiment,
         "reason": "، ".join(reasons[:3]),
+        **metadata,
     }
 
 
@@ -314,6 +600,10 @@ def normalize_article(item: dict[str, Any]) -> dict[str, Any]:
         "system_score": int(analysis["score"]),
         "system_sentiment": analysis["sentiment"],
         "system_reason": analysis["reason"],
+        "event_status": analysis.get("event_status", "غير مصنف"),
+        "confidence_score": int(analysis.get("confidence_score", 0)),
+        "confidence_label": analysis.get("confidence_label", "منخفضة"),
+        "alert_level": analysis.get("alert_level", "منخفض"),
     }
 
 
@@ -548,20 +838,16 @@ def record_usage(
 
 def ai_analyze(article: dict[str, Any]) -> dict[str, Any]:
     if not config.OPENAI_API_KEY:
-        return {
-            "score": 0,
-            "sentiment": "not_run",
-            "summary": "لم يتم تشغيل AI",
-            "reason": "مفتاح OpenAI غير مضاف",
-            "squeeze_score": 0,
-            "dilution_risk": 0,
-            "cost_usd": 0.0,
-        }
+        return ai_unavailable_result(
+            "مفتاح OpenAI غير مضاف في Streamlit Secrets أو البيئة.",
+            "missing_key",
+        )
 
     prompt = f"""
 حلل خبر سهم أمريكي بشكل صارم. لا تعتبر العنوان إيجابيًا تلقائيًا.
-افحص: قوة المحفز، الطرح والتخفيف، الضمانات، خطر الشطب،
-التجزئة العكسية، احتمال أن يكون الخبر مسعرًا، وقابلية السكويز.
+افحص: مرحلة الحدث، قوة المحفز، الطرح والتخفيف، الضمانات،
+خطر الشطب، التجزئة العكسية، احتمال أن يكون الخبر مسعرًا،
+وقابلية السكويز.
 
 أعد JSON فقط:
 {{
@@ -578,64 +864,64 @@ def ai_analyze(article: dict[str, Any]) -> dict[str, Any]:
 الملخص: {article.get("teaser")}
 تقييم النظام: {article.get("system_score")}
 رأي النظام: {article.get("system_reason")}
+حالة الحدث: {article.get("event_status")}
+ثقة النظام: {article.get("confidence_score")}
+نوع التنبيه: {article.get("alert_level")}
 """
 
-    response = requests.post(
-        config.OPENAI_URL,
-        headers={
-            "Authorization": f"Bearer {config.OPENAI_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": config.OPENAI_MODEL,
-            "input": prompt,
-            "temperature": 0.1,
-        },
-        timeout=60,
-    )
-
-    if response.status_code == 429:
-        detail = ""
-        try:
-            detail = (
-                response.json()
-                .get("error", {})
-                .get("message", "")
-            )
-        except Exception:
-            detail = response.text[:300]
-
-        raise RuntimeError(
-            "OpenAI 429: "
-            + (
-                detail
-                or "الرصيد غير كافٍ أو تم تجاوز حد الاستخدام."
-            )
+    try:
+        response = requests.post(
+            config.OPENAI_URL,
+            headers={
+                "Authorization": f"Bearer {config.OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": config.OPENAI_MODEL,
+                "input": prompt,
+                "temperature": 0.1,
+            },
+            timeout=60,
+        )
+    except Exception as exc:
+        return ai_unavailable_result(
+            f"تعذر الاتصال بـ OpenAI: {exc}",
+            "connection_error",
         )
 
-    response.raise_for_status()
-    data = response.json()
-    result = parse_json_object(extract_response_text(data))
+    if not response.ok:
+        return ai_error_from_response(response)
 
-    result["score"] = max(
-        -100,
-        min(100, int(result.get("score", 0))),
-    )
-    result["squeeze_score"] = max(
-        0,
-        min(100, int(result.get("squeeze_score", 0))),
-    )
-    result["dilution_risk"] = max(
-        0,
-        min(100, int(result.get("dilution_risk", 0))),
-    )
+    try:
+        data = response.json()
+        result = parse_json_object(extract_response_text(data))
 
-    usage = record_usage(
-        data,
-        f"article:{article.get('id')}",
-    )
-    result["cost_usd"] = usage["cost_usd"]
-    return result
+        result["available"] = True
+        result["score"] = max(
+            -100,
+            min(100, int(result.get("score", 0))),
+        )
+        result["squeeze_score"] = max(
+            0,
+            min(100, int(result.get("squeeze_score", 0))),
+        )
+        result["dilution_risk"] = max(
+            0,
+            min(100, int(result.get("dilution_risk", 0))),
+        )
+
+        usage = record_usage(
+            data,
+            f"article:{article.get('id')}",
+        )
+        result["cost_usd"] = usage["cost_usd"]
+        return result
+
+    except Exception as exc:
+        return ai_unavailable_result(
+            f"وصل رد من OpenAI لكن تعذر فهمه: {exc}",
+            "invalid_response",
+        )
 
 
 def ai_should_run(
@@ -853,6 +1139,11 @@ def record_signal(
             "signal_sentiment": signal_sentiment(article),
             "system_score": article.get("system_score", 0),
             "system_opinion": article.get("system_reason"),
+            "event_status": article.get("event_status"),
+            "confidence_score": article.get("confidence_score"),
+            "confidence_label": article.get("confidence_label"),
+            "alert_level": article.get("alert_level"),
+            "ai_available": bool(ai.get("available")),
             "ai_score": ai.get("score"),
             "ai_opinion": ai.get("summary"),
             "ai_reason": ai.get("reason"),
@@ -1065,23 +1356,45 @@ def article_message(article: dict[str, Any]) -> str:
             f"${float(tracking['price_at_signal']):.4f}"
         )
 
+    ai_score = ai.get("score")
+    ai_failed = (
+        ai.get("available") is False
+        or ai.get("sentiment") == "error"
+        or str(ai.get("summary") or "").startswith("تعذر تحليل AI")
+    )
+    ai_score_text = (
+        "غير متاح"
+        if ai_failed or ai_score is None
+        else str(ai_score)
+    )
+    squeeze = None if ai_failed else ai.get("squeeze_score")
+    dilution = None if ai_failed else ai.get("dilution_risk")
+    squeeze_text = "—" if squeeze is None else str(squeeze)
+    dilution_text = "—" if dilution is None else str(dilution)
+
     return (
         "<b>⚡ برق نيوز</b>\n"
         f"<b>{escape(symbols)}</b>\n"
         f"<b>وقت الخبر:</b> "
         f"{format_saudi_time(article.get('published'))}\n"
+        f"<b>حالة الحدث:</b> "
+        f"{escape(str(article.get('event_status') or 'غير مصنف'))}\n"
+        f"<b>نوع التنبيه:</b> "
+        f"{escape(str(article.get('alert_level') or 'منخفض'))}\n"
+        f"<b>ثقة النظام:</b> "
+        f"{article.get('confidence_score', 0)}% "
+        f"({escape(str(article.get('confidence_label') or 'منخفضة'))})\n"
         f"<b>تقييم النظام:</b> "
         f"{article.get('system_score', 0)}\n"
         f"<b>رأي النظام:</b> "
         f"{escape(str(article.get('system_reason') or 'لا توجد إشارة واضحة'))}\n"
-        f"<b>تقييم AI:</b> {ai.get('score', '—')}\n"
+        f"<b>تقييم AI:</b> {ai_score_text}\n"
         f"<b>رأي AI:</b> "
         f"{escape(str(ai.get('summary') or 'لم يتم تشغيل AI'))}\n"
         f"<b>سبب AI:</b> "
         f"{escape(str(ai.get('reason') or 'لا يوجد سبب متاح'))}\n"
-        f"<b>سكويز:</b> {ai.get('squeeze_score', '—')}\n"
-        f"<b>خطر التخفيف:</b> "
-        f"{ai.get('dilution_risk', '—')}"
+        f"<b>سكويز:</b> {squeeze_text}\n"
+        f"<b>خطر التخفيف:</b> {dilution_text}"
         f"{price_line}\n"
         f"<b>{escape(str(article.get('title', '')))}</b>"
         f"{link}"
@@ -1090,18 +1403,33 @@ def article_message(article: dict[str, Any]) -> str:
 
 def is_positive(article: dict[str, Any]) -> bool:
     ai = article.get("ai") or {}
-    sentiment = ai.get("sentiment")
+    ai_available = bool(ai.get("available"))
+    ai_sentiment = ai.get("sentiment")
+    ai_score = ai.get("score")
+    system_score = int(article.get("system_score", 0))
+    alert_level = str(article.get("alert_level") or "")
+    confidence_score = int(article.get("confidence_score", 0))
 
-    if sentiment in ("negative", "mixed"):
+    if ai_available and ai_sentiment in ("negative", "mixed"):
         return False
 
-    if sentiment == "positive":
-        return int(ai.get("score", 0)) >= config.AI_POSITIVE_MIN
+    # الأخبار المقترحة ترسل كتحديث مبدئي، ولا تُعامل كفرصة قوية.
+    if alert_level == "مبدئي":
+        if ai_available:
+            return (
+                ai_sentiment == "positive"
+                and isinstance(ai_score, int)
+                and ai_score >= 55
+            )
+        return system_score >= 45 and confidence_score >= 40
 
-    return (
-        int(article.get("system_score", 0))
-        >= config.SYSTEM_POSITIVE_MIN
-    )
+    if ai_available and ai_sentiment == "positive":
+        return (
+            isinstance(ai_score, int)
+            and ai_score >= config.AI_POSITIVE_MIN
+        )
+
+    return system_score >= config.SYSTEM_POSITIVE_MIN
 
 
 def process_articles(
@@ -1147,15 +1475,10 @@ def process_articles(
                 article["ai"] = ai_analyze(article)
             except Exception as exc:
                 article["ai_error"] = str(exc)
-                article["ai"] = {
-                    "score": 0,
-                    "sentiment": "error",
-                    "summary": "تعذر تحليل AI",
-                    "reason": str(exc),
-                    "squeeze_score": 0,
-                    "dilution_risk": 0,
-                    "cost_usd": 0.0,
-                }
+                article["ai"] = ai_unavailable_result(
+                    str(exc),
+                    "internal_error",
+                )
 
         output.append(article)
 
@@ -1214,15 +1537,10 @@ def analyze_symbol_news(
                 article["ai"] = ai_analyze(article)
             except Exception as exc:
                 article["ai_error"] = str(exc)
-                article["ai"] = {
-                    "score": 0,
-                    "sentiment": "error",
-                    "summary": "تعذر تحليل AI",
-                    "reason": str(exc),
-                    "squeeze_score": 0,
-                    "dilution_risk": 0,
-                    "cost_usd": 0.0,
-                }
+                article["ai"] = ai_unavailable_result(
+                    str(exc),
+                    "internal_error",
+                )
 
     system_scores = [
         int(article.get("system_score", 0))
@@ -1239,9 +1557,15 @@ def analyze_symbol_news(
 
     overall_ai = None
 
+    available_ai_articles = [
+        article
+        for article in articles
+        if bool((article.get("ai") or {}).get("available"))
+    ]
+
     if (
         ai_enabled
-        and articles
+        and available_ai_articles
         and config.OPENAI_API_KEY
     ):
         compact = []
@@ -1278,28 +1602,43 @@ def analyze_symbol_news(
 {json.dumps(compact, ensure_ascii=False)}
 """
 
-        response = requests.post(
-            config.OPENAI_URL,
-            headers={
-                "Authorization": f"Bearer {config.OPENAI_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": config.OPENAI_MODEL,
-                "input": prompt,
-                "temperature": 0.1,
-            },
-            timeout=60,
-        )
-        response.raise_for_status()
-        data = response.json()
-        overall_ai = parse_json_object(
-            extract_response_text(data)
-        )
-        record_usage(
-            data,
-            f"symbol_summary:{symbol}",
-        )
+        try:
+            response = requests.post(
+                config.OPENAI_URL,
+                headers={
+                    "Authorization": f"Bearer {config.OPENAI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": config.OPENAI_MODEL,
+                    "input": prompt,
+                    "temperature": 0.1,
+                },
+                timeout=60,
+            )
+
+            if response.ok:
+                data = response.json()
+                overall_ai = parse_json_object(
+                    extract_response_text(data)
+                )
+                record_usage(
+                    data,
+                    f"symbol_summary:{symbol}",
+                )
+            else:
+                overall_ai = {
+                    "available": False,
+                    "summary": "الخلاصة النهائية غير متاحة",
+                    "reason": ai_error_from_response(response).get("reason"),
+                }
+
+        except Exception as exc:
+            overall_ai = {
+                "available": False,
+                "summary": "الخلاصة النهائية غير متاحة",
+                "reason": str(exc),
+            }
 
     price_snapshot = None
     try:
@@ -1433,14 +1772,11 @@ def daily_openai_status() -> dict[str, Any]:
             status["message"] = (
                 "OpenAI يعمل والحساب يسمح بطلب جديد."
             )
-        elif response.status_code == 429:
-            status["message"] = (
-                "OpenAI أعاد 429: الرصيد غير كافٍ "
-                "أو حد الاستخدام متجاوز."
-            )
         else:
-            status["message"] = (
-                f"OpenAI: HTTP {response.status_code}"
+            error_result = ai_error_from_response(response)
+            status["message"] = str(
+                error_result.get("reason")
+                or f"OpenAI: HTTP {response.status_code}"
             )
 
     except Exception as exc:

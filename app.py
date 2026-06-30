@@ -319,7 +319,8 @@ def render_card(article: dict) -> str:
     ai = article.get("ai") or {}
     sentiment = str(
         ai.get("sentiment")
-        or article.get("system_sentiment")
+        if ai.get("available")
+        else article.get("system_sentiment")
         or "neutral"
     )
 
@@ -347,6 +348,18 @@ def render_card(article: dict) -> str:
             f'${float(tracking["price_at_signal"]):.4f}</div>'
         )
 
+    ai_score = ai.get("score")
+    ai_failed = (
+        ai.get("available") is False
+        or ai.get("sentiment") == "error"
+        or str(ai.get("summary") or "").startswith("تعذر تحليل AI")
+    )
+    ai_score_text = (
+        "غير متاح"
+        if ai_failed or ai_score is None
+        else str(ai_score)
+    )
+
     return (
         f'<a class="card {css_class}" href="{url}" target="{target}">'
         f'<div class="row">'
@@ -362,10 +375,17 @@ def render_card(article: dict) -> str:
         f'<div class="lab">تقييم النظام</div>'
         f'</div>'
         f'<div class="score">'
-        f'<div class="num">{ai.get("score", "—")}</div>'
+        f'<div class="num">{html.escape(ai_score_text)}</div>'
         f'<div class="lab">تقييم AI</div>'
         f'</div>'
         f'</div>'
+        f'<div class="opinion"><b>حالة الحدث:</b> '
+        f'{html.escape(str(article.get("event_status") or "غير مصنف"))}'
+        f' — <b>التنبيه:</b> '
+        f'{html.escape(str(article.get("alert_level") or "منخفض"))}</div>'
+        f'<div class="opinion"><b>ثقة النظام:</b> '
+        f'{article.get("confidence_score", 0)}% '
+        f'({html.escape(str(article.get("confidence_label") or "منخفضة"))})</div>'
         f'<div class="opinion"><b>رأي النظام:</b> '
         f'{html.escape(str(article.get("system_reason") or "لا توجد إشارة واضحة"))}'
         f'</div>'
@@ -436,6 +456,9 @@ def render_signal(record: dict) -> str:
         f'<div class="mini"><b>{percent(lowest)}</b><span>أدنى تغير</span></div>'
         f'<div class="mini"><b>{record.get("updates", 0)}</b><span>مرات التحديث</span></div>'
         f'</div>'
+        f'<div class="opinion"><b>حالة الحدث:</b> '
+        f'{html.escape(str(record.get("event_status") or "—"))} — '
+        f'<b>الثقة:</b> {record.get("confidence_score", "—")}%</div>'
         f'<div class="opinion"><b>رأي النظام:</b> '
         f'{html.escape(str(record.get("system_opinion") or "—"))}</div>'
         f'<div class="opinion"><b>رأي AI:</b> '
@@ -790,22 +813,29 @@ with tab_symbol:
         overall = result.get("overall_ai") or {}
         if overall:
             st.markdown("### الخلاصة النهائية")
-            st.write(overall.get("summary", ""))
-            st.write(
-                f'**التقييم النهائي:** '
-                f'{overall.get("overall_score", "—")}'
-            )
-            st.write(
-                f'**أهم إيجابية:** '
-                f'{overall.get("key_positive", "—")}'
-            )
-            st.write(
-                f'**أهم خطر:** '
-                f'{overall.get("key_risk", "—")}'
-            )
-            st.info(overall.get("verdict", ""))
 
-            if st.button(
+            if overall.get("available") is False:
+                st.warning(
+                    f'{overall.get("summary", "الخلاصة غير متاحة")}: '
+                    f'{overall.get("reason", "")}'
+                )
+            else:
+                st.write(overall.get("summary", ""))
+                st.write(
+                    f'**التقييم النهائي:** '
+                    f'{overall.get("overall_score", "—")}'
+                )
+                st.write(
+                    f'**أهم إيجابية:** '
+                    f'{overall.get("key_positive", "—")}'
+                )
+                st.write(
+                    f'**أهم خطر:** '
+                    f'{overall.get("key_risk", "—")}'
+                )
+                st.info(overall.get("verdict", ""))
+
+            if overall.get("available") is not False and st.button(
                 "إرسال خلاصة السهم إلى تيليجرام",
                 use_container_width=True,
             ):

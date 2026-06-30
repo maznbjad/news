@@ -6,4 +6,5 @@ secondaryBackgroundColor = "#10141D"
 textColor = "#F6F7FA"
 [server]
 headless = true
-enableCORS = false
+enableCORS = true
+enableXsrfProtection = true
