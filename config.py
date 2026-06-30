@@ -1,9 +1,19 @@
 from pathlib import Path
 
-MASSIVE_API_KEY = ""
-TELEGRAM_BOT_TOKEN = ""
-TELEGRAM_CHAT_ID = ""
-OPENAI_API_KEY = ""
+
+def _secret(name: str) -> str:
+    """اقرأ القيمة من Streamlit Secrets فقط، وأعد نصًا فارغًا إن لم توجد."""
+    try:
+        import streamlit as st
+        return str(st.secrets.get(name, "") or "").strip()
+    except Exception:
+        return ""
+
+
+MASSIVE_API_KEY = _secret("MASSIVE_API_KEY")
+TELEGRAM_BOT_TOKEN = _secret("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = _secret("TELEGRAM_CHAT_ID")
+OPENAI_API_KEY = _secret("OPENAI_API_KEY")
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
