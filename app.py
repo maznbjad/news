@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import os
 import threading
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -9,20 +10,41 @@ import streamlit as st
 
 import config
 from core import (
+    RECOMMENDATION_BUY,
+    RECOMMENDATION_NEGATIVE,
+    RECOMMENDATION_STRONG_BUY,
+    RECOMMENDATION_WATCH,
+    add_favorite,
     analyze_symbol_news,
     article_message,
+    calculate_statistics,
     daily_openai_status,
-    ensure_system_analysis,
+    development_dashboard,
+    enrich_article_for_display,
+    export_all_development_txt,
+    export_pending_development_txt,
+    favorite_rows,
     fetch_news,
     format_saudi_time,
+    generate_daily_development_review,
+    is_favorite,
     is_positive,
     load_account,
     load_control,
+    load_daily_reviews,
+    load_favorites,
+    load_improvements,
     load_json,
+    mark_improvement_status,
     process_articles,
     record_signals_batch,
+    remove_favorite,
     save_account,
     save_json,
+    set_favorite_reviewed,
+    signal_mismatch_reason,
+    signal_recommendation,
+    signal_result,
     telegram_send,
     update_control,
     update_signal_outcomes,
@@ -33,10 +55,10 @@ from monitor_worker import run as run_monitor_worker
 RIYADH = ZoneInfo("Asia/Riyadh")
 
 st.set_page_config(
-    page_title="برق نيوز",
+    page_title="برق — Sprint 10",
     page_icon="⚡",
-    layout="centered",
-    initial_sidebar_state="collapsed",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
 
@@ -51,264 +73,683 @@ def start_background_worker():
     return thread
 
 
-start_background_worker()
+if os.getenv("BARQ_DISABLE_WORKER") != "1":
+    start_background_worker()
 
 st.markdown(
     """
     <style>
     :root {
-      --bg:#06080d;
-      --panel:#10141d;
-      --line:rgba(255,255,255,.09);
-      --text:#f6f7fa;
-      --muted:#8e98a8;
-      --yellow:#ffd43b;
-      --green:#31d889;
-      --red:#ff6678;
+      --bg:#f6f8fc;
+      --panel:#ffffff;
+      --panel-2:#fbfcfe;
+      --line:#e5eaf2;
+      --line-strong:#d9e0eb;
+      --text:#121a2d;
+      --muted:#748096;
+      --blue:#1268e8;
+      --blue-soft:#edf4ff;
+      --green:#10a857;
+      --green-soft:#eaf8f0;
+      --red:#e74848;
+      --red-soft:#fff0f0;
+      --orange:#ee9815;
+      --orange-soft:#fff5e4;
+      --purple:#6d55d9;
+      --shadow:0 10px 30px rgba(31,48,79,.055);
+      --shadow-soft:0 4px 16px rgba(31,48,79,.04);
+      --radius:18px;
     }
+
+    * { box-sizing:border-box; }
 
     html, body, [class*="css"] {
       direction:rtl;
       text-align:right;
-      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Tahoma,Arial,sans-serif;
+      font-family:"Segoe UI",Tahoma,Arial,sans-serif;
     }
+
+    body { background:var(--bg); }
 
     .stApp {
       background:
-        radial-gradient(circle at 100% -10%,rgba(255,212,59,.12),transparent 33%),
+        radial-gradient(circle at 82% -15%, rgba(18,104,232,.06), transparent 34%),
         var(--bg);
       color:var(--text);
     }
 
     [data-testid="stHeader"],
     [data-testid="stToolbar"],
+    [data-testid="stDecoration"],
     #MainMenu,
-    footer {
+    footer { display:none!important; }
+
+    .block-container {
+      max-width:1420px;
+      padding:22px 30px 92px;
+    }
+
+    h1,h2,h3,h4,p,label,span,div { color:var(--text); }
+    h2, h3 { letter-spacing:-.2px; }
+
+    /* Sidebar */
+    [data-testid="stAppViewContainer"] {
+      direction:rtl!important;
+    }
+
+    [data-testid="stAppViewContainer"] > .main {
+      order:1;
+    }
+
+    [data-testid="stSidebar"] {
+      order:2;
+      background:#fff;
+      border-left:0;
+      border-right:1px solid var(--line);
+      box-shadow:8px 0 30px rgba(30,45,75,.025);
+    }
+
+    [data-testid="stSidebarCollapsedControl"] {
+      left:auto!important;
+      right:10px!important;
+    }
+
+    [data-testid="stSidebar"] > div:first-child {
+      padding:20px 14px 24px;
+    }
+
+    [data-testid="stSidebar"] [data-testid="stRadio"] label {
+      width:100%;
+      min-height:48px;
+      padding:0 14px;
+      margin:3px 0;
+      border-radius:12px;
+      transition:.18s ease;
+      font-weight:800;
+      color:#243047!important;
+    }
+
+    [data-testid="stSidebar"] [data-testid="stRadio"] label:hover {
+      background:#f6f8fb;
+    }
+
+    [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) {
+      background:var(--blue-soft);
+      color:var(--blue)!important;
+    }
+
+    [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) p {
+      color:var(--blue)!important;
+    }
+
+    [data-testid="stSidebar"] [data-testid="stRadio"] input {
       display:none!important;
     }
 
-    .block-container {
-      max-width:720px!important;
-      padding:18px 12px 90px!important;
-    }
-
-    h1,h2,h3,p,label,span,div {
-      color:var(--text);
-    }
-
-    .top {
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      margin-bottom:12px;
-    }
-
     .brand {
-      font-size:23px;
+      display:flex;
+      align-items:center;
+      justify-content:flex-start;
+      gap:9px;
+      font-size:29px;
       font-weight:950;
+      letter-spacing:-1px;
+      padding:4px 10px 16px;
     }
 
-    .sub {
-      font-size:11px;
+    .brand .bolt {
+      color:#ffae00!important;
+      font-size:34px;
+      filter:drop-shadow(0 4px 7px rgba(255,174,0,.22));
+    }
+
+    .sidebar-card {
+      border:1px solid var(--line);
+      background:var(--panel-2);
+      border-radius:14px;
+      padding:12px;
+      margin-top:16px;
+    }
+
+    .sidebar-card .small {
+      font-size:10px;
       color:var(--muted)!important;
+      margin-bottom:5px;
     }
 
-    .status {
+    .sidebar-card .strong {
+      font-weight:900;
+      font-size:12px;
+    }
+
+    /* Top */
+    .top-shell {
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:18px;
+      padding:4px 2px 18px;
+      border-bottom:1px solid var(--line);
+      margin-bottom:18px;
+    }
+
+    .top-title-wrap {
+      display:flex;
+      gap:12px;
+      align-items:center;
+    }
+
+    .page-icon {
+      width:43px;
+      height:43px;
+      display:grid;
+      place-items:center;
+      border-radius:13px;
+      background:var(--blue-soft);
+      color:var(--blue)!important;
+      font-size:21px;
+      font-weight:900;
+    }
+
+    .page-title {
+      font-size:27px;
+      line-height:1.1;
+      font-weight:950;
+      margin:0;
+      letter-spacing:-.7px;
+    }
+
+    .page-sub {
+      color:var(--muted)!important;
+      font-size:12px;
+      margin-top:6px;
+    }
+
+    .top-meta {
+      display:flex;
+      align-items:center;
+      gap:9px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+
+    .live {
+      display:inline-flex;
+      align-items:center;
+      gap:7px;
+      color:var(--green)!important;
+      font-weight:900;
       font-size:11px;
+      padding:8px 11px;
+      border:1px solid #cdeed9;
+      border-radius:999px;
+      background:#f2fbf5;
+    }
+
+    .live.off {
+      color:var(--muted)!important;
+      background:#fff;
+      border-color:var(--line);
+    }
+
+    .dot {
+      width:7px;
+      height:7px;
+      border-radius:50%;
+      background:currentColor;
+      display:inline-block;
+    }
+
+    .last-update {
+      font-size:10px;
+      color:var(--muted)!important;
       padding:8px 10px;
       border-radius:999px;
       border:1px solid var(--line);
+      background:#fff;
+    }
+
+    /* Metrics */
+    .metrics-2,
+    .metrics-4 {
+      display:grid;
+      gap:14px;
+      margin:14px 0 20px;
+    }
+
+    .metrics-2 { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .metrics-4 { grid-template-columns:repeat(4,minmax(0,1fr)); }
+
+    .metric-card {
+      position:relative;
+      overflow:hidden;
+      background:var(--panel);
+      border:1px solid var(--line);
+      border-radius:var(--radius);
+      padding:20px 20px 18px;
+      min-height:128px;
+      box-shadow:var(--shadow);
+    }
+
+    .metric-card::before {
+      content:"";
+      position:absolute;
+      inset:auto -28px -46px auto;
+      width:105px;
+      height:105px;
+      border-radius:50%;
+      opacity:.5;
+      background:var(--blue-soft);
+    }
+
+    .metric-card.positive::before { background:var(--green-soft); }
+    .metric-card.negative::before { background:var(--red-soft); }
+    .metric-card.pending::before { background:var(--orange-soft); }
+
+    .metric-card .metric-icon {
+      width:38px;
+      height:38px;
+      display:grid;
+      place-items:center;
+      border-radius:50%;
+      background:var(--blue-soft);
+      color:var(--blue)!important;
+      font-weight:950;
+      font-size:17px;
+      margin-bottom:10px;
+    }
+
+    .metric-card.positive .metric-icon { background:var(--green-soft); color:var(--green)!important; }
+    .metric-card.negative .metric-icon { background:var(--red-soft); color:var(--red)!important; }
+    .metric-card.pending .metric-icon { background:var(--orange-soft); color:var(--orange)!important; }
+
+    .metric-card .label {
+      color:#4c5870!important;
+      font-size:12px;
+      font-weight:800;
+      margin-bottom:7px;
+    }
+
+    .metric-card .value {
+      position:relative;
+      z-index:1;
+      font-size:33px;
+      font-weight:950;
+      line-height:1;
+    }
+
+    .metric-card .hint {
+      position:relative;
+      z-index:1;
       color:var(--muted)!important;
+      font-size:10px;
+      margin-top:9px;
     }
 
-    .status.live {
-      color:var(--green)!important;
-      border-color:rgba(49,216,137,.35);
-      background:rgba(49,216,137,.08);
-    }
+    .positive .value { color:var(--green)!important; }
+    .negative .value { color:var(--red)!important; }
+    .pending .value { color:var(--orange)!important; }
+    .processed .value { color:var(--blue)!important; }
 
-    .hero {
-      border:1px solid rgba(255,212,59,.22);
-      background:linear-gradient(145deg,rgba(255,212,59,.12),rgba(16,20,29,.96));
-      border-radius:22px;
-      padding:18px;
-      margin:8px 0 12px;
-    }
-
-    .hero h2 {
-      margin:0 0 7px;
-      font-size:23px;
-    }
-
-    .hero p {
-      margin:0;
-      color:#aab2bf!important;
-      font-size:13px;
-      line-height:1.7;
-    }
-
-    [data-testid="stButton"] button {
-      min-height:48px;
-      border-radius:15px;
-      border:1px solid var(--line);
+    /* Panels and controls */
+    .section,
+    [data-testid="stVerticalBlockBorderWrapper"] {
       background:var(--panel);
-      font-weight:900;
+      border:1px solid var(--line)!important;
+      border-radius:var(--radius)!important;
+      box-shadow:var(--shadow-soft);
     }
 
-    .big [data-testid="stButton"] button {
-      min-height:76px;
-      font-size:20px;
-      background:linear-gradient(145deg,var(--yellow),#ffb800);
-      color:#171000;
-      border:0;
+    [data-testid="stVerticalBlockBorderWrapper"] > div {
+      padding:14px!important;
     }
 
-    .card {
-      display:block;
-      text-decoration:none!important;
-      border:1px solid var(--line);
-      border-radius:17px;
-      padding:13px;
-      margin:8px 0;
-      background:var(--panel);
+    [data-baseweb="select"] > div,
+    [data-testid="stTextInput"] input,
+    [data-testid="stNumberInput"] input {
+      background:#fff!important;
+      border-color:var(--line-strong)!important;
+      border-radius:11px!important;
+      min-height:43px!important;
+      box-shadow:none!important;
     }
 
-    .card.pos {
-      background:linear-gradient(145deg,rgba(49,216,137,.18),rgba(16,20,29,.96));
-      border-color:rgba(49,216,137,.32);
+    [data-testid="stCheckbox"] label {
+      font-size:12px!important;
+      font-weight:800!important;
     }
 
-    .card.neg {
-      background:linear-gradient(145deg,rgba(255,102,120,.18),rgba(16,20,29,.96));
-      border-color:rgba(255,102,120,.32);
+    .stButton button,
+    .stDownloadButton button,
+    .stLinkButton a {
+      border-radius:11px!important;
+      min-height:40px!important;
+      padding:0 14px!important;
+      font-size:12px!important;
+      font-weight:900!important;
+      border:1px solid var(--line-strong)!important;
+      background:#fff!important;
+      color:#263249!important;
+      box-shadow:none!important;
+      transition:.18s ease!important;
     }
 
-    .card.neu {
-      background:linear-gradient(145deg,rgba(255,212,59,.14),rgba(16,20,29,.96));
-      border-color:rgba(255,212,59,.26);
+    .stButton button:hover,
+    .stDownloadButton button:hover,
+    .stLinkButton a:hover {
+      transform:translateY(-1px);
+      border-color:#bfd0ea!important;
+      background:#f9fbff!important;
     }
 
-    .row {
+    .stButton button[kind="primary"],
+    .stDownloadButton button[kind="primary"] {
+      background:var(--blue)!important;
+      color:#fff!important;
+      border-color:var(--blue)!important;
+      box-shadow:0 8px 18px rgba(18,104,232,.18)!important;
+    }
+
+    /* Legend */
+    .legend {
       display:flex;
-      justify-content:space-between;
       gap:8px;
+      flex-wrap:wrap;
+      margin:4px 0 14px;
+    }
+
+    .legend-item {
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding:7px 10px;
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:10px;
+      color:#4f5b70!important;
+      font-size:10px;
+      font-weight:800;
+    }
+
+    .legend-dot { width:7px; height:7px; border-radius:50%; display:inline-block; }
+
+    /* Table */
+    .table-head,
+    .news-grid {
+      display:grid;
+      grid-template-columns:105px 115px minmax(300px,1fr) 105px 70px;
+      gap:14px;
       align-items:center;
     }
 
-    .ticker {
-      font-weight:950;
-      color:var(--yellow)!important;
-    }
-
-    .time {
-      font-size:10px;
-      color:var(--muted)!important;
-    }
-
-    .headline {
-      font-size:14px;
-      font-weight:850;
-      line-height:1.55;
-      margin:8px 0;
-    }
-
-    .scores {
-      display:grid;
-      grid-template-columns:repeat(2,1fr);
-      gap:7px;
-    }
-
-    .score {
+    .table-head {
+      background:#fafbfd;
       border:1px solid var(--line);
-      background:rgba(0,0,0,.16);
-      padding:9px;
+      border-radius:13px 13px 8px 8px;
+      padding:12px 15px;
+      margin-top:10px;
+      position:sticky;
+      top:8px;
+      z-index:6;
+      box-shadow:0 4px 14px rgba(30,45,75,.035);
+    }
+
+    .table-head span {
+      color:#5f6b80!important;
+      font-size:10px;
+      font-weight:900;
+    }
+
+    .news-row {
+      background:#fff;
+      border:1px solid var(--line);
       border-radius:12px;
+      padding:14px 15px;
+      margin:6px 0;
+      box-shadow:0 2px 10px rgba(31,48,79,.025);
+      transition:.18s ease;
     }
 
-    .num {
-      font-size:18px;
+    .news-row:hover {
+      border-color:#cdd8e8;
+      box-shadow:0 8px 24px rgba(31,48,79,.055);
+      transform:translateY(-1px);
+    }
+
+    .symbol {
       font-weight:950;
+      color:var(--blue)!important;
+      font-size:13px;
+      direction:ltr;
+      text-align:right;
     }
 
-    .lab {
-      font-size:10px;
+    .company-note {
       color:var(--muted)!important;
-    }
-
-    .opinion {
-      margin-top:7px;
-      padding-top:7px;
-      border-top:1px solid var(--line);
-      font-size:12px;
-      line-height:1.55;
-      color:#cad1dc!important;
-    }
-
-    .metrics {
-      display:grid;
-      grid-template-columns:repeat(3,1fr);
-      gap:7px;
-      margin:10px 0;
-    }
-
-    .metric {
-      border:1px solid var(--line);
-      background:var(--panel);
-      border-radius:14px;
-      padding:11px;
-    }
-
-    .metric b {
-      font-size:17px;
-    }
-
-    .metric small {
-      display:block;
-      color:var(--muted);
+      font-size:9px;
       margin-top:3px;
     }
 
-    .learning {
-      border:1px solid var(--line);
-      background:var(--panel);
-      border-radius:17px;
-      padding:13px;
-      margin:8px 0;
+    .title-ar {
+      font-weight:850;
+      line-height:1.55;
+      font-size:13px;
     }
 
-    .learning-grid {
-      display:grid;
-      grid-template-columns:repeat(3,1fr);
-      gap:6px;
-      margin-top:8px;
+    .time {
+      color:#3d485d!important;
+      font-size:11px;
+      font-weight:750;
     }
+
+    .time small {
+      display:block;
+      color:var(--muted)!important;
+      font-size:9px;
+      margin-top:3px;
+    }
+
+    .score {
+      font-size:22px;
+      font-weight:950;
+      text-align:center;
+    }
+
+    .score.strong,.score.buy { color:var(--green)!important; }
+    .score.watch { color:var(--orange)!important; }
+    .score.negative { color:var(--red)!important; }
+
+    .badge {
+      display:inline-flex;
+      justify-content:center;
+      min-width:76px;
+      border-radius:9px;
+      padding:7px 10px;
+      font-size:10px;
+      font-weight:950;
+      white-space:nowrap;
+    }
+
+    .badge.strong,.badge.buy { color:var(--green)!important; background:var(--green-soft); }
+    .badge.watch { color:var(--orange)!important; background:var(--orange-soft); }
+    .badge.negative { color:var(--red)!important; background:var(--red-soft); }
 
     .mini {
+      color:var(--muted)!important;
+      font-size:10px;
+      margin-top:5px;
+      line-height:1.5;
+    }
+
+    .row-actions {
+      margin:-2px 0 8px;
+      padding:0 6px;
+    }
+
+    .row-actions .stButton button,
+    .row-actions .stLinkButton a {
+      min-height:32px!important;
+      font-size:10px!important;
+      padding:0 9px!important;
+    }
+
+    /* Price cells */
+    .price-grid {
+      display:grid;
+      grid-template-columns:repeat(4,minmax(0,1fr));
+      gap:7px;
+      margin-top:10px;
+    }
+
+    .price-box {
       border:1px solid var(--line);
       border-radius:10px;
-      padding:8px;
-      background:rgba(0,0,0,.15);
+      padding:8px 9px;
+      background:var(--panel-2);
     }
 
-    .mini b {
-      display:block;
-      font-size:14px;
+    .price-box b { display:block; font-size:12px; direction:ltr; text-align:right; }
+    .price-box span { color:var(--muted)!important; font-size:8px; }
+
+    /* Development */
+    .daily-card {
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:15px;
+      padding:15px;
+      min-height:260px;
+      box-shadow:var(--shadow-soft);
     }
 
-    .mini span {
+    .daily-card h4 { margin:0 0 8px; font-size:14px; }
+    .daily-card ul { padding-right:18px; margin:7px 0; }
+    .daily-card li { font-size:10px; line-height:1.7; }
+
+    .status-pill {
+      display:inline-flex;
+      border-radius:999px;
+      padding:5px 9px;
       font-size:9px;
-      color:var(--muted)!important;
+      font-weight:950;
+      margin-bottom:9px;
     }
 
-    .note {
+    .status-pill.pending { color:var(--orange)!important; background:var(--orange-soft); }
+    .status-pill.done { color:var(--green)!important; background:var(--green-soft); }
+
+    .memory-card {
+      border:1px solid var(--line);
+      border-radius:13px;
+      padding:13px;
+      background:#fff;
+      margin:7px 0;
+      box-shadow:0 2px 10px rgba(31,48,79,.025);
+    }
+
+    .memory-code { color:var(--purple)!important; font-size:9px; font-weight:950; direction:ltr; }
+
+    .result-success { color:var(--green)!important; font-weight:900; }
+    .result-fail { color:var(--red)!important; font-weight:900; }
+    .result-pending { color:var(--orange)!important; font-weight:900; }
+
+    .work-progress {
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:15px;
+      padding:15px;
+      margin:14px 0 18px;
+      box-shadow:var(--shadow-soft);
+    }
+
+    .work-progress-head {
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      margin-bottom:10px;
       font-size:11px;
-      color:var(--muted)!important;
-      line-height:1.6;
+      font-weight:900;
     }
 
-    [data-testid="stTabs"] button {
-      font-weight:900;
-      font-size:12px;
+    .work-progress-bar {
+      display:flex;
+      overflow:hidden;
+      height:40px;
+      border-radius:10px;
+      background:#edf0f5;
+    }
+
+    .work-progress-done,
+    .work-progress-pending {
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      min-width:0;
+      color:#fff!important;
+      font-size:10px;
+      font-weight:950;
+    }
+
+    .work-progress-done { background:linear-gradient(90deg,#11a858,#3bc46f); }
+    .work-progress-pending { background:linear-gradient(90deg,#ee9815,#ffae26); }
+
+    /* Chart bars */
+    .bar-list {
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:15px;
+      padding:14px;
+      box-shadow:var(--shadow-soft);
+    }
+
+    .bar-row {
+      display:grid;
+      grid-template-columns:110px 1fr 65px;
+      gap:10px;
+      align-items:center;
+      margin:12px 0;
+    }
+
+    .bar-label { font-size:11px; font-weight:800; }
+    .bar-track { height:9px; background:#edf0f5; border-radius:999px; overflow:hidden; }
+    .bar-fill { height:100%; border-radius:999px; background:var(--blue); }
+    .bar-value { font-size:11px; font-weight:900; text-align:left; direction:ltr; }
+
+    /* Mobile */
+    @media (max-width:900px) {
+      .block-container { padding:12px 9px 80px; }
+      .top-shell { padding-top:2px; align-items:center; }
+      .page-icon { width:38px; height:38px; font-size:18px; }
+      .page-title { font-size:21px; }
+      .page-sub { font-size:10px; }
+      .last-update { display:none; }
+      .metrics-4 { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .metrics-2 { gap:9px; }
+      .metric-card { min-height:112px; padding:15px; border-radius:15px; }
+      .metric-card .value { font-size:27px; }
+      .table-head { display:none; }
+      .news-grid { grid-template-columns:1fr 72px; gap:9px; }
+      .news-grid > div:nth-child(1) { grid-column:1; grid-row:1; }
+      .news-grid > div:nth-child(2) { grid-column:1 / span 2; grid-row:2; }
+      .news-grid > div:nth-child(3) { grid-column:1; grid-row:3; }
+      .news-grid > div:nth-child(4) { grid-column:2; grid-row:1; }
+      .news-grid > div:nth-child(5) { grid-column:2; grid-row:3; }
+      .news-row { padding:13px; border-radius:13px; }
+      .price-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .daily-card { min-height:auto; }
+      .top-meta { gap:5px; }
+      .live { padding:6px 9px; }
+      [data-testid="stSidebar"] { min-width:260px!important; }
+    }
+
+    @media (max-width:520px) {
+      .metrics-4 { grid-template-columns:1fr 1fr; }
+      .metric-card .hint { display:none; }
+      .metric-card { min-height:96px; }
+      .metric-card .metric-icon { width:31px; height:31px; font-size:14px; margin-bottom:7px; }
+      .metric-card .value { font-size:24px; }
+      .legend-item { padding:6px 8px; font-size:9px; }
+      .bar-row { grid-template-columns:90px 1fr 54px; }
     }
     </style>
     """,
@@ -316,319 +757,414 @@ st.markdown(
 )
 
 
-def render_card(article: dict) -> str:
-    article = ensure_system_analysis(dict(article))
-    ai = article.get("ai") or {}
-    sentiment = str(
-        ai.get("sentiment")
-        if ai.get("available")
-        else article.get("system_sentiment")
-        or "neutral"
-    )
-
-    if sentiment == "positive":
-        css_class = "pos"
-    elif sentiment in ("negative", "mixed"):
-        css_class = "neg"
-    else:
-        css_class = "neu"
-
-    tickers = " • ".join(
-        article.get("tickers") or ["—"]
-    )
-    url = html.escape(
-        str(article.get("url") or "#"),
-        quote=True,
-    )
-    target = "_blank" if url != "#" else "_self"
-
-    tracking = article.get("tracking") or {}
-    price_text = ""
-    if tracking.get("price_at_signal") is not None:
-        price_text = (
-            f'<div class="opinion"><b>سعر الرصد:</b> '
-            f'${float(tracking["price_at_signal"]):.4f}</div>'
-        )
-
-    ai_score = ai.get("score")
-    ai_failed = (
-        ai.get("available") is False
-        or ai.get("sentiment") == "error"
-        or str(ai.get("summary") or "").startswith("تعذر تحليل AI")
-    )
-    ai_score_text = (
-        "غير متاح"
-        if ai_failed or ai_score is None
-        else str(ai_score)
-    )
-
-    return (
-        f'<a class="card {css_class}" href="{url}" target="{target}">'
-        f'<div class="row">'
-        f'<span class="ticker">{html.escape(tickers)}</span>'
-        f'<span class="time">'
-        f'{html.escape(str(article.get("published_display", "—")))}</span>'
-        f'</div>'
-        f'<div class="headline">'
-        f'{html.escape(str(article.get("title", "")))}</div>'
-        f'<div class="scores">'
-        f'<div class="score">'
-        f'<div class="num">{article.get("system_score", 0)}</div>'
-        f'<div class="lab">تقييم النظام</div>'
-        f'</div>'
-        f'<div class="score">'
-        f'<div class="num">{html.escape(ai_score_text)}</div>'
-        f'<div class="lab">تقييم AI</div>'
-        f'</div>'
-        f'</div>'
-        f'<div class="opinion"><b>حالة الحدث:</b> '
-        f'{html.escape(str(article.get("event_status") or "غير مصنف"))}'
-        f' — <b>التنبيه:</b> '
-        f'{html.escape(str(article.get("alert_level") or "منخفض"))}</div>'
-        f'<div class="opinion"><b>ثقة النظام:</b> '
-        f'{article.get("confidence_score", 0)}% '
-        f'({html.escape(str(article.get("confidence_label") or "منخفضة"))})</div>'
-        f'<div class="opinion"><b>رأي النظام:</b> '
-        f'{html.escape(str(article.get("system_reason") or "لا توجد إشارة واضحة"))}'
-        f'</div>'
-        f'<div class="opinion"><b>رأي AI:</b> '
-        f'{html.escape(str(ai.get("summary") or "لم يتم تشغيل AI"))}'
-        f'</div>'
-        f'{price_text}'
-        f'</a>'
-    )
+def money(value) -> str:
+    if value is None:
+        return "—"
+    try:
+        return f"${float(value):.4f}"
+    except Exception:
+        return "—"
 
 
-def render_results(items: list[dict], max_items: int = 150) -> None:
-    if not items:
-        st.info("لا توجد نتائج.")
-        return
-
-    for article in items[:max_items]:
-        st.markdown(
-            render_card(article),
-            unsafe_allow_html=True,
-        )
+def percent(value) -> str:
+    if value is None:
+        return "—"
+    try:
+        return f"{float(value):+.2f}%"
+    except Exception:
+        return "—"
 
 
-def render_signal(record: dict) -> str:
-    if str(record.get("system_opinion") or "").strip().lower() in {
-        "",
-        "—",
-        "غير متاح",
-        "غير متوفر",
-        "none",
-        "null",
-    }:
-        repaired = ensure_system_analysis(
-            {
-                "title": record.get("title"),
-                "teaser": record.get("teaser", ""),
-                "system_score": record.get("system_score", 0),
-            }
-        )
-        record = dict(record)
-        record["system_opinion"] = repaired.get("system_reason")
-        record["event_status"] = repaired.get("event_status")
-        record["confidence_score"] = repaired.get("confidence_score")
-        record["confidence_label"] = repaired.get("confidence_label")
-        record["alert_level"] = repaired.get("alert_level")
-
-    initial = record.get("price_at_signal")
-    latest = record.get("latest_price")
-    highest = record.get("highest_change_pct")
-    lowest = record.get("lowest_change_pct")
-    last_change = record.get("last_change_pct")
-
-    def money(value):
-        return (
-            "—"
-            if value is None
-            else f"${float(value):.4f}"
-        )
-
-    def percent(value):
-        return (
-            "—"
-            if value is None
-            else f"{float(value):+.2f}%"
-        )
-
-    sentiment = str(
-        record.get("signal_sentiment") or "neutral"
-    )
-    css_class = (
-        "pos"
-        if sentiment == "positive"
-        else "neg"
-        if sentiment in ("negative", "mixed")
-        else "neu"
-    )
-
-    return (
-        f'<div class="learning card {css_class}">'
-        f'<div class="row">'
-        f'<span class="ticker">{html.escape(str(record.get("symbol", "—")))}</span>'
-        f'<span class="time">{format_saudi_time(record.get("detected_at"))}</span>'
-        f'</div>'
-        f'<div class="headline">{html.escape(str(record.get("title", "")))}</div>'
-        f'<div class="learning-grid">'
-        f'<div class="mini"><b>{money(initial)}</b><span>سعر الرصد</span></div>'
-        f'<div class="mini"><b>{money(latest)}</b><span>آخر سعر</span></div>'
-        f'<div class="mini"><b>{percent(last_change)}</b><span>التغير الحالي</span></div>'
-        f'<div class="mini"><b>{percent(highest)}</b><span>أعلى تغير</span></div>'
-        f'<div class="mini"><b>{percent(lowest)}</b><span>أدنى تغير</span></div>'
-        f'<div class="mini"><b>{record.get("updates", 0)}</b><span>مرات التحديث</span></div>'
-        f'</div>'
-        f'<div class="opinion"><b>حالة الحدث:</b> '
-        f'{html.escape(str(record.get("event_status") or "—"))} — '
-        f'<b>الثقة:</b> {record.get("confidence_score", "—")}%</div>'
-        f'<div class="opinion"><b>رأي النظام:</b> '
-        f'{html.escape(str(record.get("system_opinion") or "—"))}</div>'
-        f'<div class="opinion"><b>رأي AI:</b> '
-        f'{html.escape(str(record.get("ai_opinion") or "—"))}</div>'
-        f'<div class="opinion"><b>تعليق التطوير:</b> '
-        f'{html.escape(str(record.get("development_comment") or "—"))}</div>'
-        f'</div>'
-    )
+def rec_class(recommendation: str) -> str:
+    return {
+        RECOMMENDATION_STRONG_BUY: "strong",
+        RECOMMENDATION_BUY: "buy",
+        RECOMMENDATION_WATCH: "watch",
+        RECOMMENDATION_NEGATIVE: "negative",
+    }.get(recommendation, "watch")
 
 
-control = load_control()
-status = load_json(config.STATUS_FILE, {})
-monitoring = bool(control.get("enabled"))
-status_class = "status live" if monitoring else "status"
-
-st.markdown(
-    f"""
-    <div class="top">
-      <div>
-        <div class="brand">⚡ برق نيوز</div>
-        <div class="sub">رصد أخبار + تقييم + تعلّم من حركة السعر</div>
-      </div>
-      <div class="{status_class}">
-        {"● الرصد يعمل" if monitoring else "الرصد متوقف"}
-      </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-(
-    tab_monitor,
-    tab_retrieve,
-    tab_symbol,
-    tab_learning,
-    tab_account,
-) = st.tabs(
-    [
-        "الرصد",
-        "الاسترجاع",
-        "تحليل سهم",
-        "سجل التعلّم",
-        "الحساب",
-    ]
-)
-
-with tab_monitor:
+def metric_cards(
+    positive: int,
+    negative: int,
+    positive_hint: str = "الأخبار ذات الدرجة الإيجابية",
+    negative_hint: str = "الأخبار ذات الدرجة السلبية",
+) -> None:
     st.markdown(
-        """
-        <div class="hero">
-          <h2>الرصد الإيجابي</h2>
-          <p>
-            يراقب قائمة الأسهم، يقيّم الخبر بالنظام وAI،
-            يحفظ سعر الرصد، ويرسل الأخبار الإيجابية إلى تيليجرام.
-          </p>
+        f"""
+        <div class="metrics-2">
+          <div class="metric-card positive">
+            <div class="metric-icon">↗</div>
+            <div class="label">إيجابية</div>
+            <div class="value">{positive}</div>
+            <div class="hint">{html.escape(positive_hint)}</div>
+          </div>
+          <div class="metric-card negative">
+            <div class="metric-icon">↘</div>
+            <div class="label">سلبية</div>
+            <div class="value">{negative}</div>
+            <div class="hint">{html.escape(negative_hint)}</div>
+          </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
+
+def recommendation_legend() -> None:
     st.markdown(
-        '<div class="big">',
+        """
+        <div class="legend">
+          <span class="legend-item"><i class="legend-dot" style="background:#10a857"></i>فوق 90: شراء قوي</span>
+          <span class="legend-item"><i class="legend-dot" style="background:#48b875"></i>فوق 65: شراء</span>
+          <span class="legend-item"><i class="legend-dot" style="background:#ee9815"></i>0–65: مراقبة</span>
+          <span class="legend-item"><i class="legend-dot" style="background:#e74848"></i>أقل من 0: سلبي</span>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
-    if st.button(
-        "إيقاف الرصد" if monitoring else "تشغيل الرصد",
-        type="primary",
-        use_container_width=True,
-    ):
-        update_control(
-            enabled=not monitoring,
-            positive_only=True,
-            ai_enabled=True,
-        )
-        st.rerun()
 
-    st.markdown("</div>", unsafe_allow_html=True)
+def page_header(title: str, subtitle: str) -> None:
+    control = load_control()
+    live = bool(control.get("enabled"))
+    status = load_json(config.STATUS_FILE, {})
+    last_check = format_saudi_time(status.get("last_check")) if status.get("last_check") else "لم يبدأ الفحص"
+    icons = {
+        "الرئيسية": "⌂",
+        "الأخبار": "▤",
+        "المفضلة": "☆",
+        "سجل التعلم": "◇",
+        "الإحصائيات": "▥",
+        "تطوير AI": "AI",
+        "تحليل سهم": "⌕",
+        "الحساب": "○",
+    }
+    live_html = (
+        '<div class="live"><span class="dot"></span>يعمل</div>'
+        if live
+        else '<div class="live off"><span class="dot"></span>متوقف</div>'
+    )
+    st.markdown(
+        f"""
+        <div class="top-shell">
+          <div class="top-title-wrap">
+            <div class="page-icon">{html.escape(icons.get(title, "⚡"))}</div>
+            <div>
+              <h1 class="page-title">{html.escape(title)}</h1>
+              <div class="page-sub">{html.escape(subtitle)}</div>
+            </div>
+          </div>
+          <div class="top-meta">
+            {live_html}
+            <div class="last-update">آخر تحديث: {html.escape(last_check)}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    col_test, col_refresh = st.columns(2)
 
-    with col_test:
-        if st.button(
-            "اختبار تيليجرام",
-            use_container_width=True,
-        ):
-            ok, message = telegram_send(
-                "⚡ <b>برق نيوز</b>\nتم الاتصال بنجاح."
+def table_header() -> None:
+    st.markdown(
+        """
+        <div class="table-head">
+          <span>الوقت</span>
+          <span>الشركة / الرمز</span>
+          <span>العنوان</span>
+          <span>التوصية</span>
+          <span>الدرجة</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def article_html(article: dict) -> str:
+    item = enrich_article_for_display(article)
+    recommendation = item["recommendation"]
+    css = rec_class(recommendation)
+    symbols = " / ".join(item.get("tickers") or ["—"])
+    title = item.get("arabic_title") or "خبر جديد"
+    time_text = format_saudi_time(item.get("published"))
+    opinion = item.get("system_reason") or "لا توجد إشارة واضحة"
+    ai = item.get("ai") or {}
+    ai_summary = ai.get("summary")
+    note = ai_summary if ai_summary and ai.get("available") else opinion
+
+    return f"""
+    <div class="news-row">
+      <div class="news-grid">
+        <div class="time">{html.escape(time_text)}<small>وقت السعودية</small></div>
+        <div><div class="symbol">{html.escape(symbols)}</div><div class="company-note">خبر مرتبط بالسهم</div></div>
+        <div>
+          <div class="title-ar">{html.escape(str(title))}</div>
+          <div class="mini">{html.escape(str(note))}</div>
+        </div>
+        <div><span class="badge {css}">{html.escape(recommendation)}</span></div>
+        <div class="score {css}">{item.get("final_score", 0)}</div>
+      </div>
+    </div>
+    """
+
+
+def render_articles(
+    articles: list[dict],
+    prefix: str,
+    limit: int = 100,
+    allow_favorite: bool = True,
+) -> None:
+    if not articles:
+        st.info("لا توجد أخبار ضمن الفترة المحددة.")
+        return
+
+    recommendation_legend()
+    table_header()
+
+    for index, article in enumerate(articles[:limit]):
+        item = enrich_article_for_display(article)
+        article_id = str(item.get("id"))
+        st.markdown(article_html(item), unsafe_allow_html=True)
+
+        cols = st.columns([1, 1, 7])
+        with cols[0]:
+            if allow_favorite:
+                favorite = is_favorite(article_id)
+                if st.button(
+                    "★ محفوظ" if favorite else "☆ حفظ",
+                    key=f"{prefix}_fav_{article_id}_{index}",
+                    use_container_width=True,
+                ):
+                    if favorite:
+                        remove_favorite(article_id)
+                    else:
+                        add_favorite(item)
+                    st.rerun()
+
+        with cols[1]:
+            url = item.get("url")
+            if url:
+                st.link_button("فتح", url, use_container_width=True)
+
+        with cols[2]:
+            st.caption(
+                f"الحالة: {item.get('event_status', 'غير مصنف')}"
             )
-            if ok:
-                st.success(message)
-            else:
-                st.error(message)
 
-    with col_refresh:
-        if st.button(
-            "تحديث العرض",
-            use_container_width=True,
-        ):
-            st.rerun()
+def load_current_feed() -> list[dict]:
+    return load_json(config.FEED_FILE, [])
 
-    st.caption(
-        status.get(
-            "message",
-            "عامل الرصد يبدأ تلقائيًا مع التطبيق.",
+
+def counts_from_articles(
+    articles: list[dict],
+) -> tuple[int, int]:
+    positive = 0
+    negative = 0
+
+    for article in articles:
+        item = enrich_article_for_display(article)
+        score = int(item.get("final_score", 0))
+        if score > 0:
+            positive += 1
+        elif score < 0:
+            negative += 1
+
+    return positive, negative
+
+
+
+def render_bar_rows(
+    values: dict,
+    suffix: str = "",
+) -> None:
+    numeric = {
+        str(key): float(value or 0)
+        for key, value in values.items()
+    }
+    maximum = max(
+        [abs(value) for value in numeric.values()] or [1]
+    )
+    rows = []
+
+    for label, value in numeric.items():
+        width = (
+            abs(value) / maximum * 100
+            if maximum
+            else 0
         )
+        color = (
+            "var(--red)"
+            if value < 0
+            else "var(--green)"
+            if label in ("شراء قوي", "شراء", "نجح")
+            else "var(--orange)"
+            if label in ("مراقبة", "قيد المتابعة")
+            else "var(--blue)"
+        )
+        row_html = (
+            '<div class="bar-row">'
+            f'<div class="bar-label">{html.escape(label)}</div>'
+            '<div class="bar-track">'
+            f'<div class="bar-fill" style="width:{width:.1f}%;background:{color}"></div>'
+            '</div>'
+            f'<div class="bar-value">{value:g}{html.escape(suffix)}</div>'
+            '</div>'
+        )
+        rows.append(row_html)
+
+    st.markdown(
+        '<div class="bar-list">'
+        + "".join(rows)
+        + "</div>",
+        unsafe_allow_html=True,
     )
 
-    if status.get("last_check"):
-        st.caption(
-            f'آخر فحص: {format_saudi_time(status.get("last_check"))} — '
-            f'من المصدر: {status.get("last_raw_fetched", 0)} — '
-            f'طابق القائمة: {status.get("last_fetched", 0)} — '
-            f'أُرسل: {status.get("last_sent", 0)}'
+
+def sidebar_navigation() -> str:
+    icon_map = {
+        "الرئيسية": "⌂  الرئيسية",
+        "الأخبار": "▤  الأخبار",
+        "المفضلة": "☆  المفضلة",
+        "سجل التعلم": "◇  سجل التعلم",
+        "الإحصائيات": "▥  الإحصائيات",
+        "تطوير AI": "AI  تطوير الذكاء",
+        "تحليل سهم": "⌕  تحليل سهم",
+        "الحساب": "○  الحساب",
+    }
+
+    with st.sidebar:
+        st.markdown(
+            '<div class="brand"><span class="bolt">⚡</span>برق</div>',
+            unsafe_allow_html=True,
         )
 
-    st.subheader("آخر النتائج")
-    render_results(
-        load_json(config.FEED_FILE, []),
-        max_items=50,
+        page = st.radio(
+            "التنقل",
+            list(icon_map.keys()),
+            label_visibility="collapsed",
+            format_func=lambda value: icon_map[value],
+        )
+
+        status = load_json(config.STATUS_FILE, {})
+        control = load_control()
+        state = "الرصد يعمل" if control.get("enabled") else "الرصد متوقف"
+        last = (
+            format_saudi_time(status.get("last_check"))
+            if status.get("last_check")
+            else "لم يبدأ بعد"
+        )
+        st.markdown(
+            f"""
+            <div class="sidebar-card">
+              <div class="small">حالة النظام</div>
+              <div class="strong">{html.escape(state)}</div>
+              <div class="small" style="margin-top:10px">آخر فحص</div>
+              <div class="strong">{html.escape(last)}</div>
+              <div class="small" style="margin-top:10px">القائمة</div>
+              <div class="strong">932 سهمًا</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        return page
+
+
+page = sidebar_navigation()
+
+
+# ============================================================
+# الرئيسية
+# ============================================================
+if page == "الرئيسية":
+    page_header(
+        "الرئيسية",
+        "ملخص الرصد وآخر الأخبار المؤثرة",
     )
 
-with tab_retrieve:
-    st.subheader("استرجاع الأخبار وإرسالها")
+    feed = load_current_feed()
+    positive_count, negative_count = counts_from_articles(feed)
+    metric_cards(positive_count, negative_count)
 
-    period = st.selectbox(
-        "الفترة",
-        [
-            "آخر 15 دقيقة",
-            "آخر 30 دقيقة",
-            "آخر ساعتين",
-            "آخر 6 ساعات",
-            "آخر 24 ساعة",
-            "آخر أسبوع",
-        ],
+    control = load_control()
+    monitoring = bool(control.get("enabled"))
+    with st.container(border=True):
+        col_start, col_refresh, col_telegram = st.columns(3)
+
+        with col_start:
+            if st.button(
+                "إيقاف الرصد" if monitoring else "تشغيل الرصد",
+                type="primary",
+                use_container_width=True,
+            ):
+                update_control(
+                    enabled=not monitoring,
+                    positive_only=True,
+                    ai_enabled=True,
+                )
+                st.rerun()
+
+        with col_refresh:
+            if st.button(
+                "تحديث العرض",
+                use_container_width=True,
+            ):
+                st.rerun()
+
+        with col_telegram:
+            if st.button(
+                "اختبار تيليجرام",
+                use_container_width=True,
+            ):
+                ok, message = telegram_send(
+                    "⚡ <b>برق</b>\nتم الاتصال بنجاح."
+                )
+                if ok:
+                    st.success(message)
+                else:
+                    st.error(message)
+
+    st.subheader("آخر الأخبار")
+    render_articles(feed, "home", limit=20)
+
+
+# ============================================================
+# الأخبار
+# ============================================================
+elif page == "الأخبار":
+    page_header(
+        "الأخبار",
+        "استرجاع الأخبار وفلترتها وإرسالها إلى تيليجرام",
     )
 
-    news_type = st.selectbox(
-        "النوع",
-        ["إيجابية", "سلبية", "الكل"],
-    )
-
-    use_ai = st.checkbox(
-        "تحليل AI للأخبار المهمة",
-        value=True,
-    )
+    with st.container(border=True):
+        control_cols = st.columns([1.2, 1, 1, 1])
+        with control_cols[0]:
+            period = st.selectbox(
+                "الفترة",
+                [
+                    "آخر 15 دقيقة",
+                    "آخر 30 دقيقة",
+                    "آخر ساعتين",
+                    "آخر 6 ساعات",
+                    "آخر 24 ساعة",
+                    "آخر أسبوع",
+                ],
+            )
+        with control_cols[1]:
+            news_type = st.selectbox(
+                "النوع",
+                ["الكل", "إيجابية", "سلبية"],
+            )
+        with control_cols[2]:
+            use_ai = st.checkbox(
+                "تحليل AI",
+                value=True,
+            )
+        with control_cols[3]:
+            send_telegram = st.checkbox(
+                "إرسال تيليجرام",
+                value=False,
+            )
 
     hours = {
         "آخر 15 دقيقة": 0.25,
@@ -640,14 +1176,12 @@ with tab_retrieve:
     }[period]
 
     if st.button(
-        "استرجاع وإرسال إلى تيليجرام",
+        "جلب الأخبار",
         type="primary",
         use_container_width=True,
     ):
         try:
-            with st.spinner(
-                "جارٍ جلب جميع صفحات الأخبار وفلترتها..."
-            ):
+            with st.spinner("جارٍ جلب الأخبار وتحليلها..."):
                 raw_items = fetch_news(
                     hours=hours,
                     limit=config.NEWS_LIMIT,
@@ -661,102 +1195,732 @@ with tab_retrieve:
 
                 if news_type == "إيجابية":
                     results = [
-                        article
-                        for article in results
-                        if is_positive(article)
+                        item
+                        for item in results
+                        if enrich_article_for_display(item)[
+                            "final_score"
+                        ] > 0
                     ]
                 elif news_type == "سلبية":
                     results = [
-                        article
-                        for article in results
-                        if (
-                            (
-                                article.get("ai")
-                                or {}
-                            ).get("sentiment")
-                            in ("negative", "mixed")
-                            or int(
-                                article.get(
-                                    "system_score",
-                                    0,
-                                )
-                            )
-                            < 0
-                        )
+                        item
+                        for item in results
+                        if enrich_article_for_display(item)[
+                            "final_score"
+                        ] < 0
                     ]
 
                 signal_map = record_signals_batch(results)
                 for article in results:
-                    records = (
-                        signal_map.get(
-                            str(article.get("id"))
-                        )
-                        or []
-                    )
+                    records = signal_map.get(
+                        str(article.get("id"))
+                    ) or []
                     if records:
                         article["tracking"] = records[0]
 
                 save_json(
                     config.RETRIEVAL_FILE,
-                    results[:1000],
+                    results[:2000],
                 )
 
                 sent_count = 0
-                for article in results[:50]:
-                    ok, _ = telegram_send(
-                        article_message(article)
-                    )
-                    if ok:
-                        sent_count += 1
+                if send_telegram:
+                    for article in results[:100]:
+                        ok, _ = telegram_send(
+                            article_message(article)
+                        )
+                        if ok:
+                            sent_count += 1
 
-                st.session_state["retrieve_stats"] = {
+                st.session_state["news_fetch_stats"] = {
                     "raw": len(raw_items),
                     "matched": len(results),
                     "sent": sent_count,
                 }
 
-                st.success(
-                    f"جلبنا {len(raw_items)} خبرًا من المصدر، "
-                    f"وبعد الفلترة بقي {len(results)}، "
-                    f"وأرسلنا {sent_count} إشعارًا."
-                )
-
         except Exception as exc:
             st.error(str(exc))
 
-    stats = st.session_state.get("retrieve_stats")
+    results = load_json(config.RETRIEVAL_FILE, [])
+    positive_count, negative_count = counts_from_articles(results)
+    metric_cards(positive_count, negative_count)
+
+    stats = st.session_state.get("news_fetch_stats")
     if stats:
         st.caption(
-            f'المصدر: {stats["raw"]} — '
-            f'بعد الفلترة: {stats["matched"]} — '
-            f'تيليجرام: {stats["sent"]}'
+            f'المصدر: {stats["raw"]} خبر — '
+            f'المطابق للقائمة: {stats["matched"]} — '
+            f'المرسل: {stats["sent"]}'
         )
 
-    st.subheader("قائمة الاسترجاع")
-    render_results(
-        load_json(config.RETRIEVAL_FILE, []),
-        max_items=300,
+    render_articles(results, "news", limit=300)
+
+
+# ============================================================
+# المفضلة
+# ============================================================
+elif page == "المفضلة":
+    page_header(
+        "المفضلة",
+        "الأخبار المحفوظة ومتابعة السعر منذ لحظة الرصد",
     )
 
-with tab_symbol:
-    st.subheader("تحليل سريع لأخبار سهم")
+    rows = favorite_rows()
+    positive = sum(
+        1 for row in rows if int(row.get("score", 0)) > 0
+    )
+    negative = sum(
+        1 for row in rows if int(row.get("score", 0)) < 0
+    )
+    metric_cards(
+        positive,
+        negative,
+        "الأخبار الإيجابية المحفوظة",
+        "الأخبار السلبية المحفوظة",
+    )
 
-    symbol = st.text_input(
-        "رمز السهم",
-        placeholder="مثال: NTCL",
-    ).strip().upper()
+    with st.container(border=True):
+        filter_cols = st.columns([2, 1])
+        with filter_cols[0]:
+            search = st.text_input(
+                "بحث",
+                placeholder="ابحث بالرمز أو العنوان",
+            ).strip().lower()
+        with filter_cols[1]:
+            review_filter = st.selectbox(
+                "الحالة",
+                ["الكل", "تمت المراجعة", "لم تراجع"],
+            )
 
-    symbol_period = st.selectbox(
+    if search:
+        rows = [
+            row
+            for row in rows
+            if search in str(row.get("symbol", "")).lower()
+            or search in str(row.get("title", "")).lower()
+        ]
+
+    if review_filter == "تمت المراجعة":
+        rows = [row for row in rows if row.get("reviewed")]
+    elif review_filter == "لم تراجع":
+        rows = [row for row in rows if not row.get("reviewed")]
+
+    if not rows:
+        st.info("لم تحفظ أي خبر في المفضلة بعد.")
+    else:
+        recommendation_legend()
+        table_header()
+
+    for index, row in enumerate(rows):
+        recommendation = str(row.get("recommendation"))
+        css = rec_class(recommendation)
+
+        st.markdown(
+            f"""
+            <div class="news-row">
+              <div class="news-grid">
+                <div class="time">{html.escape(format_saudi_time(row.get("detected_at")))}<small>وقت الرصد</small></div>
+                <div><div class="symbol">{html.escape(str(row.get("symbol") or "—"))}</div><div class="company-note">محفوظ في المفضلة</div></div>
+                <div>
+                  <div class="title-ar">{html.escape(str(row.get("title") or "خبر محفوظ"))}</div>
+                  <div class="price-grid">
+                    <div class="price-box"><b>{money(row.get("price_at_signal"))}</b><span>سعر الرصد</span></div>
+                    <div class="price-box"><b>{money(row.get("lowest_price"))}</b><span>أدنى سعر منذ الرصد</span></div>
+                    <div class="price-box"><b>{money(row.get("highest_price"))}</b><span>أعلى سعر منذ الرصد</span></div>
+                    <div class="price-box"><b>{percent(row.get("last_change_pct"))}</b><span>التغير الحالي</span></div>
+                  </div>
+                </div>
+                <div><span class="badge {css}">{html.escape(recommendation)}</span></div>
+                <div class="score {css}">{row.get("score", 0)}</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        cols = st.columns([1.2, 1, 1, 4])
+        with cols[0]:
+            reviewed = st.checkbox(
+                "تمت المراجعة",
+                value=bool(row.get("reviewed")),
+                key=f"fav_review_{row.get('article_id')}_{index}",
+            )
+            if reviewed != bool(row.get("reviewed")):
+                set_favorite_reviewed(
+                    str(row.get("article_id")),
+                    reviewed,
+                )
+                st.rerun()
+
+        with cols[1]:
+            if st.button(
+                "حذف",
+                key=f"fav_remove_{row.get('article_id')}_{index}",
+                use_container_width=True,
+            ):
+                remove_favorite(
+                    str(row.get("article_id"))
+                )
+                st.rerun()
+
+        with cols[2]:
+            if row.get("url"):
+                st.link_button(
+                    "فتح",
+                    row["url"],
+                    use_container_width=True,
+                )
+
+
+# ============================================================
+# سجل التعلم
+# ============================================================
+elif page == "سجل التعلم":
+    page_header(
+        "سجل التعلم",
+        "مقارنة درجة الخبر بما حدث فعليًا في حركة السعر",
+    )
+
+    with st.container(border=True):
+        col_update, col_filter = st.columns([1, 3])
+        with col_update:
+            if st.button(
+                "تحديث الأسعار",
+                type="primary",
+                use_container_width=True,
+            ):
+                try:
+                    result = update_signal_outcomes()
+                    st.success(
+                        f'تم تحديث {result["updated_records"]} سجل.'
+                    )
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+
+        with col_filter:
+            symbol_filter = st.text_input(
+                "فلترة بالرمز",
+                placeholder="مثال: NTCL",
+            ).strip().upper()
+
+    records = load_json(config.SIGNALS_FILE, [])
+    if symbol_filter:
+        records = [
+            item
+            for item in records
+            if str(item.get("symbol", "")).upper()
+            == symbol_filter
+        ]
+
+    records.sort(
+        key=lambda item: item.get("detected_at") or "",
+        reverse=True,
+    )
+
+    successes = sum(
+        1 for item in records if signal_result(item) == "نجح"
+    )
+    failures = sum(
+        1
+        for item in records
+        if signal_result(item) == "لم ينجح"
+    )
+    metric_cards(
+        successes,
+        failures,
+        "إشارات طابقت اتجاه السعر",
+        "إشارات خالفت اتجاه السعر",
+    )
+
+    if records:
+        recommendation_legend()
+        table_header()
+
+    for index, record in enumerate(records[:500]):
+        recommendation = signal_recommendation(record)
+        css = rec_class(recommendation)
+        result = signal_result(record)
+        mismatch = signal_mismatch_reason(record)
+        result_css = {
+            "نجح": "result-success",
+            "لم ينجح": "result-fail",
+            "قيد المتابعة": "result-pending",
+        }[result]
+
+        score = (
+            record.get("ai_score")
+            if isinstance(record.get("ai_score"), (int, float))
+            else record.get("system_score", 0)
+        )
+
+        article = {
+            "title": record.get("title"),
+            "system_reason": record.get("system_opinion"),
+            "system_score": record.get("system_score", 0),
+            "event_status": record.get("event_status"),
+            "tickers": [record.get("symbol")],
+            "ai": {
+                "available": record.get("ai_available"),
+                "score": record.get("ai_score"),
+                "summary": record.get("ai_opinion"),
+            },
+        }
+        title = enrich_article_for_display(article)[
+            "arabic_title"
+        ]
+
+        st.markdown(
+            f"""
+            <div class="news-row">
+              <div class="news-grid">
+                <div class="time">{html.escape(format_saudi_time(record.get("detected_at")))}<small>وقت الرصد</small></div>
+                <div><div class="symbol">{html.escape(str(record.get("symbol") or "—"))}</div><div class="company-note"><span class="{result_css}">{result}</span></div></div>
+                <div>
+                  <div class="title-ar">{html.escape(str(title))}</div>
+                  <div class="price-grid">
+                    <div class="price-box"><b>{money(record.get("price_at_signal"))}</b><span>سعر الرصد</span></div>
+                    <div class="price-box"><b>{money(record.get("lowest_price"))}</b><span>أدنى سعر</span></div>
+                    <div class="price-box"><b>{money(record.get("highest_price"))}</b><span>أعلى سعر</span></div>
+                    <div class="price-box"><b>{money(record.get("latest_price"))}</b><span>السعر الحالي</span></div>
+                  </div>
+                  <div class="mini">التغير: {percent(record.get("last_change_pct"))}</div>
+                  <div class="mini">{html.escape(str(mismatch or record.get("development_comment") or ""))}</div>
+                </div>
+                <div><span class="badge {css}">{html.escape(recommendation)}</span></div>
+                <div class="score {css}">{score}</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+# ============================================================
+# الإحصائيات
+# ============================================================
+elif page == "الإحصائيات":
+    page_header(
+        "الإحصائيات",
+        "ملخص أداء الرصد والتوصيات مقارنة بحركة السعر",
+    )
+
+    days = st.selectbox(
         "الفترة",
-        [
-            "آخر 15 دقيقة",
-            "آخر 30 دقيقة",
-            "آخر 24 ساعة",
-            "آخر 3 أيام",
-            "آخر أسبوع",
-        ],
-        key="symbol_period",
+        [7, 30, 90, 180],
+        index=1,
+        format_func=lambda value: f"آخر {value} يومًا",
     )
+    stats = calculate_statistics(days=days)
+
+    st.markdown(
+        f"""
+        <div class="metrics-4">
+          <div class="metric-card">
+            <div class="metric-icon">▤</div>
+            <div class="label">إجمالي الإشارات</div>
+            <div class="value">{stats["total"]}</div>
+            <div class="hint">خلال {days} يومًا</div>
+          </div>
+          <div class="metric-card positive">
+            <div class="metric-icon">↗</div>
+            <div class="label">إيجابية</div>
+            <div class="value">{stats["positive"]}</div>
+            <div class="hint">درجة أعلى من صفر</div>
+          </div>
+          <div class="metric-card negative">
+            <div class="metric-icon">↘</div>
+            <div class="label">سلبية</div>
+            <div class="value">{stats["negative"]}</div>
+            <div class="hint">درجة أقل من صفر</div>
+          </div>
+          <div class="metric-card processed">
+            <div class="metric-icon">%</div>
+            <div class="label">نسبة النجاح</div>
+            <div class="value">{stats["success_rate"]}%</div>
+            <div class="hint">من الإشارات المحسومة</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    col_rec, col_result = st.columns(2)
+
+    with col_rec:
+        st.subheader("توزيع التوصيات")
+        render_bar_rows(
+            stats["recommendations"],
+        )
+
+    with col_result:
+        st.subheader("نتائج الإشارات")
+        render_bar_rows(
+            stats["results"],
+        )
+
+    st.subheader("متوسط تغير السعر حسب التوصية")
+    render_bar_rows(
+        stats["average_changes"],
+        suffix="%",
+    )
+
+    st.subheader("أكثر الأخطاء رصدًا")
+    if stats["top_errors"]:
+        for item in stats["top_errors"]:
+            st.markdown(
+                f"""
+                <div class="memory-card">
+                  <b>{html.escape(str(item["type"]))}</b>
+                  <div class="mini">تكرر {item["count"]} مرات</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+    else:
+        st.info("لا توجد أخطاء متكررة كافية ضمن الفترة.")
+
+
+# ============================================================
+# تطوير AI
+# ============================================================
+elif page == "تطوير AI":
+    page_header(
+        "تطوير AI",
+        "ذاكرة تراكمية للتعليقات اليومية والتحسينات المنفذة والمعلقة",
+    )
+
+    dashboard = development_dashboard()
+
+    st.markdown(
+        f"""
+        <div class="metrics-4">
+          <div class="metric-card">
+            <div class="metric-icon">▣</div>
+            <div class="label">أيام مسجلة</div>
+            <div class="value">{dashboard["days_recorded"]}</div>
+            <div class="hint">إجمالي التعليقات اليومية</div>
+          </div>
+          <div class="metric-card processed">
+            <div class="metric-icon">✓</div>
+            <div class="label">تم العمل عليها</div>
+            <div class="value">{dashboard["days_processed"]}</div>
+            <div class="hint">أيام تم تصدير ملاحظاتها</div>
+          </div>
+          <div class="metric-card pending">
+            <div class="metric-icon">◷</div>
+            <div class="label">ملاحظات معلقة</div>
+            <div class="value">{dashboard["days_pending"]}</div>
+            <div class="hint">أيام لم يتم تصديرها</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-icon">AI</div>
+            <div class="label">تحسينات معلقة</div>
+            <div class="value">{dashboard["pending_improvements"]}</div>
+            <div class="hint">عناصر داخل ذاكرة التطوير</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    total_days = max(1, int(dashboard["days_recorded"]))
+    processed_days = int(dashboard["days_processed"])
+    pending_days = int(dashboard["days_pending"])
+    processed_pct = processed_days / total_days * 100
+    pending_pct = pending_days / total_days * 100
+
+    st.markdown(
+        f"""
+        <div class="work-progress">
+          <div class="work-progress-head">
+            <span>حالة العمل</span>
+            <span>{processed_days} تم العمل عليها — {pending_days} معلقة</span>
+          </div>
+          <div class="work-progress-bar">
+            <div class="work-progress-done" style="width:{processed_pct:.1f}%">{processed_days}</div>
+            <div class="work-progress-pending" style="width:{pending_pct:.1f}%">{pending_days}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    pending_total = int(dashboard["days_pending"])
+    export_options = [
+        value
+        for value in (10, 30, 50, 100)
+        if value < pending_total
+    ]
+    export_options.append(
+        pending_total if pending_total else 1
+    )
+    export_options = sorted(set(export_options))
+
+    export_limit = st.selectbox(
+        "عدد الأيام المراد تصديرها من الأقدم",
+        export_options,
+        index=len(export_options) - 1,
+        format_func=lambda value: (
+            f"{value} يوم"
+            if value != pending_total
+            else f"كل المعلق ({pending_total})"
+        ),
+        disabled=pending_total == 0,
+    )
+
+    action_cols = st.columns(4)
+
+    with action_cols[0]:
+        if st.button(
+            "إنشاء تعليق اليوم",
+            type="primary",
+            use_container_width=True,
+        ):
+            with st.spinner("جارٍ تحليل الأخطاء مع الذاكرة السابقة..."):
+                review = generate_daily_development_review(
+                    force=False
+                )
+            st.success(
+                f'تم تجهيز تعليق {review.get("date")}.'
+            )
+            st.rerun()
+
+    with action_cols[1]:
+        if st.button(
+            "إعادة تحليل اليوم",
+            use_container_width=True,
+        ):
+            with st.spinner("جارٍ إعادة التحليل..."):
+                review = generate_daily_development_review(
+                    force=True
+                )
+            st.success("تم تحديث تعليق اليوم.")
+            st.rerun()
+
+    with action_cols[2]:
+        if st.button(
+            "تجهيز الملاحظات المعلقة",
+            use_container_width=True,
+        ):
+            export = export_pending_development_txt(limit=export_limit)
+            st.session_state["pending_export"] = export
+            if export["count"]:
+                st.success(export["message"])
+                st.rerun()
+            else:
+                st.info(export["message"])
+
+    with action_cols[3]:
+        if st.button(
+            "تجهيز السجل الكامل",
+            use_container_width=True,
+        ):
+            st.session_state[
+                "full_export"
+            ] = export_all_development_txt()
+
+    pending_export = st.session_state.get("pending_export")
+    if pending_export and pending_export.get("text"):
+        st.download_button(
+            "تنزيل ملف الملاحظات المعلقة TXT",
+            data=pending_export["text"],
+            file_name=pending_export["filename"],
+            mime="text/plain",
+            type="primary",
+            use_container_width=True,
+        )
+
+    full_export = st.session_state.get("full_export")
+    if full_export and full_export.get("text"):
+        st.download_button(
+            "تنزيل السجل التراكمي الكامل TXT",
+            data=full_export["text"],
+            file_name=full_export["filename"],
+            mime="text/plain",
+            use_container_width=True,
+        )
+
+    st.subheader("سجل التعليقات اليومية")
+    reviews = development_dashboard()["reviews"]
+
+    if not reviews:
+        st.info("لم يتم إنشاء أي تعليق يومي بعد.")
+
+    for start_index in range(0, len(reviews), 3):
+        columns = st.columns(3)
+        for offset, review in enumerate(
+            reviews[start_index:start_index + 3]
+        ):
+            with columns[offset]:
+                status = review.get("status")
+                status_text = (
+                    "تم العمل على الملاحظات"
+                    if status in ("exported", "processed")
+                    else "معلقة"
+                )
+                status_css = (
+                    "done"
+                    if status in ("exported", "processed")
+                    else "pending"
+                )
+
+                errors = review.get("errors") or []
+                recommendations = (
+                    review.get("recommendations") or []
+                )
+
+                error_html = "".join(
+                    f"<li>{html.escape(str(item.get('title')))}</li>"
+                    for item in errors[:4]
+                )
+                rec_html = "".join(
+                    f"<li>{html.escape(str(item.get('title')))}</li>"
+                    for item in recommendations[:4]
+                )
+
+                st.markdown(
+                    f"""
+                    <div class="daily-card">
+                      <span class="status-pill {status_css}">{status_text}</span>
+                      <h4>{html.escape(str(review.get("date")))}</h4>
+                      <div class="mini">{html.escape(str(review.get("summary") or ""))}</div>
+                      <hr>
+                      <b>الأخطاء</b>
+                      <ul>{error_html or "<li>لا توجد أخطاء قوية</li>"}</ul>
+                      <b>التحسينات</b>
+                      <ul>{rec_html or "<li>لا يوجد اقتراح جديد</li>"}</ul>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                with st.expander("التفاصيل والذاكرة"):
+                    st.write(review.get("summary"))
+                    for note in review.get("memory_notes") or []:
+                        st.caption(f"ذاكرة: {note}")
+
+                    for error in errors:
+                        st.markdown(
+                            f"**{error.get('title')}** — "
+                            f"{error.get('reason')}"
+                        )
+                        st.caption(
+                            str(error.get("evidence") or "")
+                        )
+
+                    for rec in recommendations:
+                        st.markdown(
+                            f"**{rec.get('title')}**"
+                        )
+                        st.write(rec.get("action"))
+                        st.caption(
+                            f"الرمز: {rec.get('code')} — "
+                            f"النوع: {rec.get('mode')}"
+                        )
+
+    st.subheader("ذاكرة التحسينات")
+    improvements = development_dashboard()[
+        "improvements"
+    ]
+
+    for index, item in enumerate(improvements):
+        status_map = {
+            "pending": "معلقة",
+            "exported": "تم العمل على الملاحظات",
+            "implemented": "تم التنفيذ",
+            "monitoring": "تحت قياس الأثر",
+            "closed": "مغلقة",
+        }
+        st.markdown(
+            f"""
+            <div class="memory-card">
+              <div class="memory-code">{html.escape(str(item.get("code")))}</div>
+              <b>{html.escape(str(item.get("title") or ""))}</b>
+              <div class="mini">{html.escape(str(item.get("action") or ""))}</div>
+              <div class="mini">
+                الحالة: {html.escape(status_map.get(item.get("status"), str(item.get("status"))))}
+                — أول ظهور: {html.escape(str(item.get("first_seen") or "—"))}
+                — آخر ظهور: {html.escape(str(item.get("last_seen") or "—"))}
+                — تكرر: {item.get("times_seen", 1)}
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        cols = st.columns([1, 1, 1, 4])
+        with cols[0]:
+            if st.button(
+                "تم التنفيذ",
+                key=f"imp_done_{item.get('code')}_{index}",
+                use_container_width=True,
+            ):
+                mark_improvement_status(
+                    str(item.get("code")),
+                    "implemented",
+                    "تم تأكيد تنفيذ التحسين من الواجهة.",
+                )
+                st.rerun()
+
+        with cols[1]:
+            if st.button(
+                "قياس الأثر",
+                key=f"imp_monitor_{item.get('code')}_{index}",
+                use_container_width=True,
+            ):
+                mark_improvement_status(
+                    str(item.get("code")),
+                    "monitoring",
+                    "تم وضع التحسين تحت قياس الأثر.",
+                )
+                st.rerun()
+
+        with cols[2]:
+            if st.button(
+                "إغلاق",
+                key=f"imp_close_{item.get('code')}_{index}",
+                use_container_width=True,
+            ):
+                mark_improvement_status(
+                    str(item.get("code")),
+                    "closed",
+                    "أُغلق التحسين يدويًا.",
+                )
+                st.rerun()
+
+
+# ============================================================
+# تحليل سهم
+# ============================================================
+elif page == "تحليل سهم":
+    page_header(
+        "تحليل سهم",
+        "بحث مباشر عن أخبار رمز واحد مع خلاصة AI",
+    )
+
+    cols = st.columns([2, 1, 1])
+    with cols[0]:
+        symbol = st.text_input(
+            "رمز السهم",
+            placeholder="مثال: NTCL",
+        ).strip().upper()
+    with cols[1]:
+        symbol_period = st.selectbox(
+            "الفترة",
+            [
+                "آخر 15 دقيقة",
+                "آخر 30 دقيقة",
+                "آخر 24 ساعة",
+                "آخر 3 أيام",
+                "آخر أسبوع",
+            ],
+        )
+    with cols[2]:
+        symbol_use_ai = st.checkbox(
+            "تحليل AI",
+            value=True,
+        )
 
     symbol_hours = {
         "آخر 15 دقيقة": 0.25,
@@ -766,14 +1930,8 @@ with tab_symbol:
         "آخر أسبوع": 168,
     }[symbol_period]
 
-    symbol_use_ai = st.checkbox(
-        "تقييم AI وإنشاء خلاصة نهائية",
-        value=True,
-        key="symbol_ai",
-    )
-
     if st.button(
-        "تحليل أخبار السهم",
+        "تحليل السهم",
         type="primary",
         use_container_width=True,
     ):
@@ -781,74 +1939,40 @@ with tab_symbol:
             st.warning("أدخل رمز السهم.")
         else:
             try:
-                with st.spinner(
-                    "جارٍ طلب أخبار الرمز مباشرة وتحليلها..."
-                ):
+                with st.spinner("جارٍ تحليل الأخبار..."):
                     result = analyze_symbol_news(
                         symbol=symbol,
                         hours=symbol_hours,
                         ai_enabled=symbol_use_ai,
                     )
                     st.session_state[
-                        "symbol_analysis_result"
+                        "symbol_result"
                     ] = result
-
             except Exception as exc:
                 st.error(str(exc))
 
-    result = st.session_state.get(
-        "symbol_analysis_result"
-    )
-
+    result = st.session_state.get("symbol_result")
     if result:
-        latest_price = result.get("latest_price")
-        latest_price_text = (
-            "—"
-            if latest_price is None
-            else f"${float(latest_price):.4f}"
+        articles = result.get("articles") or []
+        positive_count, negative_count = counts_from_articles(
+            articles
         )
-
-        st.markdown(
-            f"""
-            <div class="metrics">
-              <div class="metric">
-                <b>{result.get("count", 0)}</b>
-                <small>الأخبار</small>
-              </div>
-              <div class="metric">
-                <b>{result.get("system_average", 0)}</b>
-                <small>متوسط النظام</small>
-              </div>
-              <div class="metric">
-                <b>{result.get("ai_average", 0)}</b>
-                <small>متوسط AI</small>
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        st.caption(
-            f'آخر سعر متاح: {latest_price_text} — '
-            f'حلل AI عدد {result.get("ai_analyzed_count", 0)} خبر — '
-            f'حُفظت {result.get("saved_signals", 0)} إشارة.'
-        )
+        metric_cards(positive_count, negative_count)
 
         overall = result.get("overall_ai") or {}
         if overall:
-            st.markdown("### الخلاصة النهائية")
-
             if overall.get("available") is False:
                 st.warning(
-                    f'{overall.get("summary", "الخلاصة غير متاحة")}: '
-                    f'{overall.get("reason", "")}'
+                    overall.get("reason")
+                    or "الخلاصة غير متاحة."
                 )
             else:
-                st.write(overall.get("summary", ""))
-                st.write(
-                    f'**التقييم النهائي:** '
-                    f'{overall.get("overall_score", "—")}'
+                st.markdown(
+                    '<div class="section">',
+                    unsafe_allow_html=True,
                 )
+                st.subheader("الخلاصة")
+                st.write(overall.get("summary"))
                 st.write(
                     f'**أهم إيجابية:** '
                     f'{overall.get("key_positive", "—")}'
@@ -858,205 +1982,104 @@ with tab_symbol:
                     f'{overall.get("key_risk", "—")}'
                 )
                 st.info(overall.get("verdict", ""))
-
-            if overall.get("available") is not False and st.button(
-                "إرسال خلاصة السهم إلى تيليجرام",
-                use_container_width=True,
-            ):
-                message = (
-                    f'<b>⚡ تحليل سهم '
-                    f'{html.escape(result.get("symbol", ""))}</b>\n'
-                    f'<b>عدد الأخبار:</b> '
-                    f'{result.get("count", 0)}\n'
-                    f'<b>آخر سعر:</b> {latest_price_text}\n'
-                    f'<b>متوسط النظام:</b> '
-                    f'{result.get("system_average", 0)}\n'
-                    f'<b>متوسط AI:</b> '
-                    f'{result.get("ai_average", 0)}\n'
-                    f'<b>الخلاصة:</b> '
-                    f'{html.escape(str(overall.get("summary", "")))}\n'
-                    f'<b>أهم إيجابية:</b> '
-                    f'{html.escape(str(overall.get("key_positive", "")))}\n'
-                    f'<b>أهم خطر:</b> '
-                    f'{html.escape(str(overall.get("key_risk", "")))}\n'
-                    f'<b>الرأي النهائي:</b> '
-                    f'{html.escape(str(overall.get("verdict", "")))}'
+                st.markdown(
+                    "</div>",
+                    unsafe_allow_html=True,
                 )
 
-                ok, message_text = telegram_send(message)
-                if ok:
-                    st.success(message_text)
-                else:
-                    st.error(message_text)
-
-        st.markdown("### الأخبار المجمعة")
-        render_results(
-            result.get("articles", []),
-            max_items=150,
+        render_articles(
+            articles,
+            "symbol",
+            limit=150,
         )
 
-with tab_learning:
-    st.subheader("سجل التعلّم من النتائج")
 
-    st.markdown(
-        """
-        <div class="note">
-          يحتفظ النظام بدرجة الخبر ورأي النظام وAI وسعر لحظة الرصد،
-          ثم يحدث أعلى وأدنى وآخر سعر ويضيف تعليقًا للمراجعة والتطوير.
-          التخزين الحالي ملف JSON داخل التطبيق.
-        </div>
-        """,
-        unsafe_allow_html=True,
+# ============================================================
+# الحساب
+# ============================================================
+elif page == "الحساب":
+    page_header(
+        "الحساب",
+        "حالة OpenAI والتكلفة التقديرية",
     )
 
-    col_update, col_reload = st.columns(2)
-
-    with col_update:
-        if st.button(
-            "تحديث الأسعار الآن",
-            type="primary",
-            use_container_width=True,
-        ):
-            try:
-                with st.spinner(
-                    "جارٍ تحديث نتائج الإشارات..."
-                ):
-                    update_result = update_signal_outcomes()
-
-                st.success(
-                    f'تحدث {update_result["updated_records"]} سجل '
-                    f'لعدد {update_result["updated_tickers"]} سهم.'
-                )
-
-                if update_result["errors"]:
-                    st.warning(
-                        "بعض الأسعار لم تتوفر: "
-                        + " | ".join(
-                            update_result["errors"][:5]
-                        )
-                    )
-
-            except Exception as exc:
-                st.error(str(exc))
-
-    with col_reload:
-        if st.button(
-            "تحديث القائمة",
-            use_container_width=True,
-        ):
-            st.rerun()
-
-    signals = load_json(config.SIGNALS_FILE, [])
-
-    symbol_filter = st.text_input(
-        "فلترة السجل برمز سهم",
-        placeholder="مثال: NTCL",
-        key="learning_symbol_filter",
-    ).strip().upper()
-
-    if symbol_filter:
-        signals = [
-            record
-            for record in signals
-            if str(
-                record.get("symbol") or ""
-            ).upper()
-            == symbol_filter
-        ]
-
-    signals = sorted(
-        signals,
-        key=lambda record: record.get(
-            "detected_at",
-            "",
-        ),
-        reverse=True,
-    )
-
-    st.caption(
-        f"عدد السجلات المعروضة: {len(signals)}"
-    )
-
-    for record in signals[:300]:
-        st.markdown(
-            render_signal(record),
-            unsafe_allow_html=True,
-        )
-
-with tab_account:
     account = load_account()
     totals = usage_totals()
 
-    st.subheader("OpenAI والتكلفة")
-
     st.markdown(
         f"""
-        <div class="metrics">
-          <div class="metric">
-            <b>${totals["today_cost"]:.4f}</b>
-            <small>مصروف اليوم</small>
+        <div class="metrics-4">
+          <div class="metric-card">
+            <div class="metric-icon">$</div>
+            <div class="label">مصروف اليوم</div>
+            <div class="value">${totals["today_cost"]:.4f}</div>
           </div>
-          <div class="metric">
-            <b>${totals["week_cost"]:.4f}</b>
-            <small>مصروف الأسبوع</small>
+          <div class="metric-card">
+            <div class="metric-icon">7</div>
+            <div class="label">مصروف الأسبوع</div>
+            <div class="value">${totals["week_cost"]:.4f}</div>
           </div>
-          <div class="metric">
-            <b>${totals["estimated_remaining"]:.2f}</b>
-            <small>متبقي تقديري</small>
+          <div class="metric-card">
+            <div class="metric-icon">Σ</div>
+            <div class="label">إجمالي المصروف</div>
+            <div class="value">${totals["total_cost"]:.4f}</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-icon">≈</div>
+            <div class="label">المتبقي التقديري</div>
+            <div class="value">${totals["estimated_remaining"]:.2f}</div>
           </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    starting_balance = st.number_input(
-        "الرصيد المشحون بالدولار",
-        min_value=0.0,
-        value=float(
-            account.get(
-                "starting_balance_usd",
-                5.0,
-            )
-        ),
-        step=1.0,
-    )
-
-    weekly_budget = st.number_input(
-        "الحد الأسبوعي بالدولار",
-        min_value=0.0,
-        value=float(
-            account.get(
-                "weekly_budget_usd",
-                2.0,
-            )
-        ),
-        step=0.5,
-    )
-
-    ai_mode = st.selectbox(
-        "استخدام AI",
-        ["economic", "professional", "off"],
-        index=[
-            "economic",
-            "professional",
-            "off",
-        ].index(
-            str(
+    cols = st.columns(3)
+    with cols[0]:
+        starting_balance = st.number_input(
+            "الرصيد المشحون",
+            min_value=0.0,
+            value=float(
                 account.get(
-                    "ai_mode",
-                    "economic",
+                    "starting_balance_usd",
+                    5.0,
                 )
-            )
-        ),
-        format_func=lambda value: {
-            "economic": "اقتصادي — الأخبار الواضحة فقط",
-            "professional": "احترافي — أخبار أكثر",
-            "off": "إيقاف AI",
-        }[value],
-    )
+            ),
+            step=1.0,
+        )
+    with cols[1]:
+        weekly_budget = st.number_input(
+            "الحد الأسبوعي",
+            min_value=0.0,
+            value=float(
+                account.get(
+                    "weekly_budget_usd",
+                    2.0,
+                )
+            ),
+            step=0.5,
+        )
+    with cols[2]:
+        ai_mode = st.selectbox(
+            "وضع AI",
+            ["economic", "professional", "off"],
+            index=[
+                "economic",
+                "professional",
+                "off",
+            ].index(
+                str(account.get("ai_mode", "economic"))
+            ),
+            format_func=lambda value: {
+                "economic": "اقتصادي",
+                "professional": "احترافي",
+                "off": "متوقف",
+            }[value],
+        )
 
     if st.button(
-        "حفظ إعدادات الحساب",
+        "حفظ الإعدادات",
+        type="primary",
         use_container_width=True,
     ):
         account.update(
@@ -1069,90 +2092,12 @@ with tab_account:
         save_account(account)
         st.success("تم الحفظ.")
 
-    col_openai, col_report = st.columns(2)
-
-    with col_openai:
-        if st.button(
-            "فحص OpenAI الآن",
-            use_container_width=True,
-        ):
-            openai_status = daily_openai_status()
-            if openai_status["connected"]:
-                st.success(openai_status["message"])
-            else:
-                st.error(openai_status["message"])
-
-    with col_report:
-        if st.button(
-            "إرسال تقرير الحساب",
-            use_container_width=True,
-        ):
-            openai_status = daily_openai_status()
-            message = (
-                "<b>⚡ حساب برق نيوز</b>\n"
-                f"<b>حالة OpenAI:</b> "
-                f'{openai_status["message"]}\n'
-                f"<b>مصروف اليوم:</b> "
-                f'${openai_status["today_cost"]:.4f}\n'
-                f"<b>مصروف الأسبوع:</b> "
-                f'${openai_status["week_cost"]:.4f}\n'
-                f"<b>المتبقي التقديري:</b> "
-                f'${openai_status["estimated_remaining"]:.4f}'
-            )
-
-            ok, message_text = telegram_send(message)
-            if ok:
-                st.success(message_text)
-            else:
-                st.error(message_text)
-
-    st.subheader("المدفوعات")
-
-    payments = load_json(config.PAYMENTS_FILE, [])
-    amount = st.number_input(
-        "إضافة شحن بالدولار",
-        min_value=0.0,
-        value=0.0,
-        step=1.0,
-    )
-    note = st.text_input("ملاحظة الدفعة")
-
     if st.button(
-        "تسجيل الدفعة",
+        "فحص OpenAI",
         use_container_width=True,
     ):
-        if amount <= 0:
-            st.warning("أدخل مبلغًا أكبر من صفر.")
+        status = daily_openai_status()
+        if status["connected"]:
+            st.success(status["message"])
         else:
-            payments.append(
-                {
-                    "date": datetime.now(
-                        RIYADH
-                    ).isoformat(),
-                    "amount_usd": amount,
-                    "note": note,
-                }
-            )
-            save_json(
-                config.PAYMENTS_FILE,
-                payments,
-            )
-            account["starting_balance_usd"] = (
-                float(
-                    account.get(
-                        "starting_balance_usd",
-                        0,
-                    )
-                )
-                + amount
-            )
-            save_account(account)
-            st.success("تم تسجيل الدفعة.")
-            st.rerun()
-
-    for payment in reversed(payments[-10:]):
-        st.caption(
-            f'${payment.get("amount_usd", 0):.2f} — '
-            f'{payment.get("note", "")} — '
-            f'{format_saudi_time(payment.get("date"))}'
-        )
+            st.error(status["message"])

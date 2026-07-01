@@ -1,0 +1,16 @@
+تعليمات الترقية إلى برق v15
+
+1) خذ نسخة احتياطية من مجلد data في نسختك الحالية.
+2) استبدل ملفات التطبيق بملفات v15.
+3) أعد ملفاتك المهمة عند الحاجة:
+   - symbols.txt
+   - signal_history.json
+   - feed.json
+   - account.json
+4) اترك الملفات الجديدة التالية موجودة:
+   - favorites.json
+   - daily_ai_reviews.json
+   - improvement_registry.json
+   - development_exports.json
+5) لا ترفع secrets.toml إلى GitHub.
+6) أضف المفاتيح في Streamlit Secrets ثم نفذ Reboot app.

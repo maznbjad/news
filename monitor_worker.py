@@ -12,6 +12,7 @@ from core import (
     daily_openai_status,
     fetch_news,
     format_saudi_time,
+    generate_daily_development_review,
     is_positive,
     load_account,
     load_control,
@@ -272,6 +273,7 @@ def run() -> None:
             )
 
             update_outcomes_if_needed()
+            generate_daily_development_review(force=False)
             send_heartbeat_if_needed()
 
         except Exception as exc:

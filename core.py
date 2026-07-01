@@ -940,6 +940,7 @@ def ai_analyze(article: dict[str, Any]) -> dict[str, Any]:
 {{
   "score": عدد صحيح من -100 إلى 100,
   "sentiment": "positive أو negative أو neutral أو mixed",
+  "arabic_title": "عنوان عربي مختصر للخبر لا يتجاوز 12 كلمة",
   "summary": "رأي عربي قصير وواضح",
   "reason": "سبب القرار بالعربية",
   "squeeze_score": عدد من 0 إلى 100,
@@ -984,6 +985,9 @@ def ai_analyze(article: dict[str, Any]) -> dict[str, Any]:
         result = parse_json_object(extract_response_text(data))
 
         result["available"] = True
+        result["arabic_title"] = clean_text(
+            result.get("arabic_title")
+        )[:140]
         result["score"] = max(
             -100,
             min(100, int(result.get("score", 0))),
@@ -1428,7 +1432,7 @@ def update_signal_outcomes(
 
 
 def article_message(article: dict[str, Any]) -> str:
-    article = ensure_system_analysis(dict(article))
+    article = enrich_article_for_display(article)
     ai = article.get("ai") or {}
     symbols = " • ".join(article.get("tickers") or ["—"])
     url = article.get("url") or ""
@@ -1450,43 +1454,35 @@ def article_message(article: dict[str, Any]) -> str:
     ai_failed = (
         ai.get("available") is False
         or ai.get("sentiment") == "error"
-        or str(ai.get("summary") or "").startswith("تعذر تحليل AI")
+        or str(ai.get("summary") or "").startswith(
+            "تعذر تحليل AI"
+        )
     )
     ai_score_text = (
         "غير متاح"
         if ai_failed or ai_score is None
         else str(ai_score)
     )
-    squeeze = None if ai_failed else ai.get("squeeze_score")
-    dilution = None if ai_failed else ai.get("dilution_risk")
-    squeeze_text = "—" if squeeze is None else str(squeeze)
-    dilution_text = "—" if dilution is None else str(dilution)
 
     return (
         "<b>⚡ برق نيوز</b>\n"
         f"<b>{escape(symbols)}</b>\n"
         f"<b>وقت الخبر:</b> "
         f"{format_saudi_time(article.get('published'))}\n"
+        f"<b>العنوان:</b> "
+        f"{escape(str(article.get('arabic_title')))}\n"
+        f"<b>الدرجة:</b> "
+        f"{article.get('final_score', 0)}\n"
+        f"<b>التوصية:</b> "
+        f"{escape(str(article.get('recommendation')))}\n"
         f"<b>حالة الحدث:</b> "
         f"{escape(str(article.get('event_status') or 'غير مصنف'))}\n"
-        f"<b>نوع التنبيه:</b> "
-        f"{escape(str(article.get('alert_level') or 'منخفض'))}\n"
-        f"<b>ثقة النظام:</b> "
-        f"{article.get('confidence_score', 0)}% "
-        f"({escape(str(article.get('confidence_label') or 'منخفضة'))})\n"
-        f"<b>تقييم النظام:</b> "
-        f"{article.get('system_score', 0)}\n"
         f"<b>رأي النظام:</b> "
         f"{escape(str(article.get('system_reason') or 'لا توجد إشارة واضحة'))}\n"
         f"<b>تقييم AI:</b> {ai_score_text}\n"
         f"<b>رأي AI:</b> "
-        f"{escape(str(ai.get('summary') or 'لم يتم تشغيل AI'))}\n"
-        f"<b>سبب AI:</b> "
-        f"{escape(str(ai.get('reason') or 'لا يوجد سبب متاح'))}\n"
-        f"<b>سكويز:</b> {squeeze_text}\n"
-        f"<b>خطر التخفيف:</b> {dilution_text}"
-        f"{price_line}\n"
-        f"<b>{escape(str(article.get('title', '')))}</b>"
+        f"{escape(str(ai.get('summary') or 'لم يتم تشغيل AI'))}"
+        f"{price_line}"
         f"{link}"
     )
 
@@ -1875,3 +1871,1323 @@ def daily_openai_status() -> dict[str, Any]:
         )
 
     return status
+
+
+# ============================================================
+# v15 — العرض المبسط، المفضلة، الإحصائيات، والتطوير التراكمي
+# ============================================================
+
+RECOMMENDATION_STRONG_BUY = "شراء قوي"
+RECOMMENDATION_BUY = "شراء"
+RECOMMENDATION_WATCH = "مراقبة"
+RECOMMENDATION_NEGATIVE = "سلبي"
+
+
+def effective_score(article: dict[str, Any]) -> int:
+    ai = article.get("ai") or {}
+    ai_score = ai.get("score")
+
+    if (
+        ai.get("available") is True
+        and isinstance(ai_score, (int, float))
+    ):
+        return int(round(float(ai_score)))
+
+    try:
+        return int(article.get("system_score", 0))
+    except Exception:
+        return 0
+
+
+def recommendation_from_score(score: int | float) -> str:
+    value = float(score)
+
+    if value > 90:
+        return RECOMMENDATION_STRONG_BUY
+    if value > 65:
+        return RECOMMENDATION_BUY
+    if value < 0:
+        return RECOMMENDATION_NEGATIVE
+    return RECOMMENDATION_WATCH
+
+
+def article_recommendation(article: dict[str, Any]) -> str:
+    return recommendation_from_score(effective_score(article))
+
+
+def concise_arabic_title(article: dict[str, Any]) -> str:
+    ai = article.get("ai") or {}
+    ai_title = clean_text(ai.get("arabic_title"))
+
+    if ai_title:
+        return ai_title[:140]
+
+    original = clean_text(article.get("title"))
+    if re.search(r"[\u0600-\u06FF]", original):
+        return original[:140]
+
+    reason = clean_text(
+        article.get("system_reason")
+        or article.get("system_opinion")
+    )
+    symbol = " / ".join(article.get("tickers") or [])
+
+    title_map = {
+        "اعتماد FDA": "هيئة الغذاء والدواء تعتمد منتجًا جديدًا",
+        "تصريح FDA": "الشركة تحصل على تصريح من هيئة الغذاء والدواء",
+        "تصريح 510(k)": "الشركة تحصل على تصريح طبي 510(k)",
+        "عقد جديد": "الشركة تحصل على عقد جديد",
+        "أمر شراء": "الشركة تعلن أمر شراء جديد",
+        "طلبية جديدة": "الشركة تستقبل طلبية جديدة",
+        "شراكة استراتيجية": "الشركة تعلن شراكة استراتيجية",
+        "شراكة": "الشركة تعلن اتفاق شراكة",
+        "مرحلة ثالثة": "تطور جديد في المرحلة الثالثة للتجربة",
+        "نتائج إيجابية": "الشركة تعلن نتائج إيجابية",
+        "حقق الهدف الرئيسي": "التجربة تحقق هدفها الرئيسي",
+        "تفوق على التوقعات": "النتائج تتفوق على التوقعات",
+        "رفع التوقعات": "الشركة ترفع توقعاتها المستقبلية",
+        "إعادة شراء أسهم": "الشركة تعلن إعادة شراء الأسهم",
+        "منحة": "الشركة تحصل على منحة جديدة",
+        "براءة اختراع": "الشركة تحصل على براءة اختراع",
+        "إطلاق تجاري": "الشركة تبدأ إطلاقًا تجاريًا جديدًا",
+        "إطلاق": "الشركة تطلق منتجًا جديدًا",
+        "توسع": "الشركة تعلن خطة توسع",
+        "طرح أسهم": "الشركة تعلن طرح أسهم",
+        "طرح مباشر": "الشركة تعلن طرحًا مباشرًا",
+        "خطر شطب": "الشركة تواجه خطر الشطب",
+        "عدم امتثال": "إشعار بعدم الامتثال لمتطلبات الإدراج",
+        "إفلاس": "الشركة تعلن إجراءات إفلاس",
+        "فشل تجربة": "التجربة السريرية لا تحقق النتائج المطلوبة",
+        "تعليق سريري": "تعليق التجربة السريرية",
+        "تجزئة عكسية": "الشركة تعلن تجزئة عكسية",
+        "خفض التوقعات": "الشركة تخفض توقعاتها المستقبلية",
+        "دون التوقعات": "النتائج تأتي دون التوقعات",
+    }
+
+    for key, title in title_map.items():
+        if key in reason:
+            return f"{title} — {symbol}" if symbol else title
+
+    event_status = clean_text(article.get("event_status"))
+    if "استحواذ" in reason or event_status in {
+        "قيد المراجعة",
+        "مقترح غير نهائي",
+        "موافق عليه",
+        "اتفاق نهائي",
+        "مكتمل",
+        "ملغى أو مرفوض",
+    }:
+        event_titles = {
+            "قيد المراجعة": "عرض استحواذ قيد المراجعة",
+            "مقترح غير نهائي": "عرض استحواذ مقترح وغير نهائي",
+            "موافق عليه": "موافقة رسمية على صفقة الاستحواذ",
+            "اتفاق نهائي": "توقيع اتفاق استحواذ نهائي",
+            "مكتمل": "اكتمال صفقة الاستحواذ",
+            "ملغى أو مرفوض": "رفض أو إلغاء عرض الاستحواذ",
+        }
+        title = event_titles.get(
+            event_status,
+            "تطور جديد في صفقة استحواذ",
+        )
+        return f"{title} — {symbol}" if symbol else title
+
+    if reason and reason != "لا توجد إشارة آلية قوية":
+        return f"{reason} — {symbol}" if symbol else reason
+
+    return (
+        f"تحديث جديد عن سهم {symbol}"
+        if symbol
+        else original[:100] or "خبر جديد"
+    )
+
+
+def enrich_article_for_display(
+    article: dict[str, Any],
+) -> dict[str, Any]:
+    output = ensure_system_analysis(dict(article))
+    output["final_score"] = effective_score(output)
+    output["recommendation"] = article_recommendation(output)
+    output["arabic_title"] = concise_arabic_title(output)
+    return output
+
+
+def _favorite_id(article: dict[str, Any]) -> str:
+    return str(
+        article.get("id")
+        or article.get("article_id")
+        or (
+            clean_text(article.get("published"))
+            + ":"
+            + clean_text(article.get("title"))
+        )
+    )
+
+
+def load_favorites() -> list[dict[str, Any]]:
+    favorites = load_json(config.FAVORITES_FILE, [])
+    return favorites if isinstance(favorites, list) else []
+
+
+def is_favorite(article_id: str) -> bool:
+    target = str(article_id)
+    return any(
+        str(item.get("article_id")) == target
+        for item in load_favorites()
+    )
+
+
+def add_favorite(article: dict[str, Any]) -> dict[str, Any]:
+    favorites = load_favorites()
+    article = enrich_article_for_display(article)
+    article_id = _favorite_id(article)
+
+    for item in favorites:
+        if str(item.get("article_id")) == article_id:
+            return item
+
+    signal_map = record_signals_batch([article])
+    signal_records = signal_map.get(article_id) or []
+
+    item = {
+        "article_id": article_id,
+        "saved_at": datetime.now(RIYADH).isoformat(),
+        "reviewed": False,
+        "article": article,
+        "signal_ids": [
+            record.get("signal_id")
+            for record in signal_records
+            if record.get("signal_id")
+        ],
+    }
+    favorites.append(item)
+    save_json(config.FAVORITES_FILE, favorites[-5000:])
+    return item
+
+
+def remove_favorite(article_id: str) -> bool:
+    target = str(article_id)
+    favorites = load_favorites()
+    filtered = [
+        item
+        for item in favorites
+        if str(item.get("article_id")) != target
+    ]
+    changed = len(filtered) != len(favorites)
+
+    if changed:
+        save_json(config.FAVORITES_FILE, filtered)
+
+    return changed
+
+
+def set_favorite_reviewed(
+    article_id: str,
+    reviewed: bool,
+) -> bool:
+    favorites = load_favorites()
+    changed = False
+
+    for item in favorites:
+        if str(item.get("article_id")) == str(article_id):
+            item["reviewed"] = bool(reviewed)
+            item["reviewed_at"] = (
+                datetime.now(RIYADH).isoformat()
+                if reviewed
+                else None
+            )
+            changed = True
+            break
+
+    if changed:
+        save_json(config.FAVORITES_FILE, favorites)
+
+    return changed
+
+
+def favorite_rows() -> list[dict[str, Any]]:
+    favorites = load_favorites()
+    signals = load_json(config.SIGNALS_FILE, [])
+    signal_by_id = {
+        str(record.get("signal_id")): record
+        for record in signals
+    }
+    rows: list[dict[str, Any]] = []
+
+    for favorite in favorites:
+        article = enrich_article_for_display(
+            favorite.get("article") or {}
+        )
+        linked = [
+            signal_by_id[signal_id]
+            for signal_id in favorite.get("signal_ids") or []
+            if signal_id in signal_by_id
+        ]
+
+        if not linked:
+            article_id = str(favorite.get("article_id"))
+            linked = [
+                record
+                for record in signals
+                if str(record.get("article_id")) == article_id
+            ]
+
+        first_signal = linked[0] if linked else {}
+        lowest_values = [
+            float(record["lowest_price"])
+            for record in linked
+            if record.get("lowest_price") is not None
+        ]
+        highest_values = [
+            float(record["highest_price"])
+            for record in linked
+            if record.get("highest_price") is not None
+        ]
+
+        rows.append(
+            {
+                "article_id": favorite.get("article_id"),
+                "reviewed": bool(favorite.get("reviewed")),
+                "saved_at": favorite.get("saved_at"),
+                "detected_at": (
+                    first_signal.get("detected_at")
+                    or favorite.get("saved_at")
+                ),
+                "symbol": " / ".join(
+                    article.get("tickers") or []
+                ),
+                "title": article.get("arabic_title"),
+                "score": article.get("final_score", 0),
+                "recommendation": article.get("recommendation"),
+                "url": article.get("url"),
+                "price_at_signal": first_signal.get(
+                    "price_at_signal"
+                ),
+                "lowest_price": (
+                    min(lowest_values)
+                    if lowest_values
+                    else first_signal.get("lowest_price")
+                ),
+                "highest_price": (
+                    max(highest_values)
+                    if highest_values
+                    else first_signal.get("highest_price")
+                ),
+                "latest_price": first_signal.get("latest_price"),
+                "last_change_pct": first_signal.get(
+                    "last_change_pct"
+                ),
+            }
+        )
+
+    rows.sort(
+        key=lambda item: item.get("saved_at") or "",
+        reverse=True,
+    )
+    return rows
+
+
+def signal_recommendation(record: dict[str, Any]) -> str:
+    score = record.get("ai_score")
+    if not isinstance(score, (int, float)):
+        score = record.get("system_score", 0)
+
+    return recommendation_from_score(score or 0)
+
+
+def signal_result(record: dict[str, Any]) -> str:
+    change = record.get("last_change_pct")
+    if change is None or int(record.get("updates", 0)) < 1:
+        return "قيد المتابعة"
+
+    recommendation = signal_recommendation(record)
+    value = float(change)
+
+    if recommendation in (
+        RECOMMENDATION_STRONG_BUY,
+        RECOMMENDATION_BUY,
+    ):
+        return "نجح" if value > 0 else "لم ينجح"
+
+    if recommendation == RECOMMENDATION_NEGATIVE:
+        return "نجح" if value < 0 else "لم ينجح"
+
+    return "قيد المتابعة"
+
+
+def signal_mismatch_reason(
+    record: dict[str, Any],
+) -> str | None:
+    result = signal_result(record)
+    if result != "لم ينجح":
+        return None
+
+    recommendation = signal_recommendation(record)
+    change = record.get("last_change_pct")
+    score = (
+        record.get("ai_score")
+        if isinstance(record.get("ai_score"), (int, float))
+        else record.get("system_score", 0)
+    )
+    event_status = clean_text(record.get("event_status"))
+    title = clean_text(record.get("title")).lower()
+
+    reasons: list[str] = []
+
+    if event_status in (
+        "مقترح غير نهائي",
+        "قيد المراجعة",
+    ):
+        reasons.append("الخبر غير نهائي وقد يكون السوق لم يثق بإتمامه")
+
+    if any(
+        term in title
+        for term in (
+            "offering",
+            "warrant",
+            "dilution",
+            "shelf",
+            "atm",
+        )
+    ):
+        reasons.append("احتمال وجود تخفيف أو تمويل عكس أثر الخبر")
+
+    if recommendation in (
+        RECOMMENDATION_STRONG_BUY,
+        RECOMMENDATION_BUY,
+    ) and float(change or 0) <= 0:
+        reasons.append("درجة الخبر أعلى من استجابة السعر الفعلية")
+
+    if recommendation == RECOMMENDATION_NEGATIVE and float(change or 0) >= 0:
+        reasons.append("السوق تجاهل الأثر السلبي أو كان الخبر مسعرًا مسبقًا")
+
+    if abs(float(score or 0)) >= 90:
+        reasons.append("الدرجة القصوى قد تكون مبالغًا فيها دون سياق السيولة والقيمة السوقية")
+
+    return "؛ ".join(reasons) or "حركة السعر لم تطابق اتجاه الخبر"
+
+
+def calculate_statistics(
+    days: int = 30,
+) -> dict[str, Any]:
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, days))
+    records = load_json(config.SIGNALS_FILE, [])
+    selected: list[dict[str, Any]] = []
+
+    for record in records:
+        detected = parse_time(record.get("detected_at"))
+        if detected and detected < cutoff:
+            continue
+        selected.append(record)
+
+    positive = 0
+    negative = 0
+    neutral = 0
+    result_counts = {
+        "نجح": 0,
+        "لم ينجح": 0,
+        "قيد المتابعة": 0,
+    }
+    recommendation_counts = {
+        RECOMMENDATION_STRONG_BUY: 0,
+        RECOMMENDATION_BUY: 0,
+        RECOMMENDATION_WATCH: 0,
+        RECOMMENDATION_NEGATIVE: 0,
+    }
+    changes_by_recommendation: dict[str, list[float]] = {
+        key: []
+        for key in recommendation_counts
+    }
+    mismatch_types: dict[str, int] = {}
+    daily: dict[str, dict[str, int]] = {}
+
+    for record in selected:
+        score = (
+            record.get("ai_score")
+            if isinstance(record.get("ai_score"), (int, float))
+            else record.get("system_score", 0)
+        )
+        score = float(score or 0)
+
+        if score > 0:
+            positive += 1
+        elif score < 0:
+            negative += 1
+        else:
+            neutral += 1
+
+        recommendation = signal_recommendation(record)
+        recommendation_counts[recommendation] += 1
+
+        result = signal_result(record)
+        result_counts[result] += 1
+
+        change = record.get("last_change_pct")
+        if change is not None:
+            changes_by_recommendation[recommendation].append(
+                float(change)
+            )
+
+        mismatch = signal_mismatch_reason(record)
+        if mismatch:
+            primary = mismatch.split("؛")[0]
+            mismatch_types[primary] = (
+                mismatch_types.get(primary, 0) + 1
+            )
+
+        detected = parse_time(record.get("detected_at"))
+        if detected:
+            date_key = detected.astimezone(RIYADH).date().isoformat()
+            bucket = daily.setdefault(
+                date_key,
+                {
+                    "total": 0,
+                    "positive": 0,
+                    "negative": 0,
+                    "success": 0,
+                    "failure": 0,
+                },
+            )
+            bucket["total"] += 1
+            if score > 0:
+                bucket["positive"] += 1
+            elif score < 0:
+                bucket["negative"] += 1
+            if result == "نجح":
+                bucket["success"] += 1
+            elif result == "لم ينجح":
+                bucket["failure"] += 1
+
+    averages = {
+        key: (
+            round(sum(values) / len(values), 2)
+            if values
+            else 0.0
+        )
+        for key, values in changes_by_recommendation.items()
+    }
+
+    decided = result_counts["نجح"] + result_counts["لم ينجح"]
+    success_rate = (
+        round(result_counts["نجح"] / decided * 100, 1)
+        if decided
+        else 0.0
+    )
+
+    top_errors = sorted(
+        (
+            {"type": key, "count": value}
+            for key, value in mismatch_types.items()
+        ),
+        key=lambda item: item["count"],
+        reverse=True,
+    )[:8]
+
+    return {
+        "days": days,
+        "total": len(selected),
+        "positive": positive,
+        "negative": negative,
+        "neutral": neutral,
+        "recommendations": recommendation_counts,
+        "results": result_counts,
+        "success_rate": success_rate,
+        "average_changes": averages,
+        "top_errors": top_errors,
+        "daily": daily,
+    }
+
+
+def _review_date(record: dict[str, Any]) -> str:
+    return str(record.get("date") or "")
+
+
+def load_daily_reviews() -> list[dict[str, Any]]:
+    reviews = load_json(config.DAILY_REVIEWS_FILE, [])
+    return reviews if isinstance(reviews, list) else []
+
+
+def load_improvements() -> list[dict[str, Any]]:
+    items = load_json(config.IMPROVEMENTS_FILE, [])
+    return items if isinstance(items, list) else []
+
+
+def _normalize_issue_code(value: Any) -> str:
+    text = clean_text(value).lower()
+    text = re.sub(r"[^a-z0-9_\-]+", "_", text)
+    return text.strip("_")[:80] or "general_improvement"
+
+
+def _local_daily_review(
+    date_key: str,
+    stats: dict[str, Any],
+    previous: list[dict[str, Any]],
+) -> dict[str, Any]:
+    registry = {
+        str(item.get("code")): item
+        for item in previous
+    }
+    recommendations: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+
+    failure_count = int(
+        stats.get("results", {}).get("لم ينجح", 0)
+    )
+    total = int(stats.get("total", 0))
+
+    if failure_count:
+        errors.append(
+            {
+                "code": "score_price_mismatch",
+                "title": "عدم مطابقة تغير السعر مع درجة الخبر",
+                "reason": "بعض الدرجات المرتفعة لم تتبعها حركة سعر إيجابية",
+                "evidence": f"{failure_count} إشارة لم تنجح من أصل {total}",
+                "severity": "عالية" if failure_count >= 5 else "متوسطة",
+            }
+        )
+        code = "score_price_mismatch"
+        old = registry.get(code)
+
+        if old and old.get("status") in (
+            "exported",
+            "implemented",
+        ):
+            recommendations.append(
+                {
+                    "code": "score_price_mismatch_followup",
+                    "title": "قياس أثر تعديل الدرجات السابق",
+                    "action": "قارن نتائج ما قبل التعديل وما بعده، وحدد أنواع الأخبار التي ما زالت تحصل على درجات أعلى من استجابة السعر.",
+                    "reason": "المشكلة استمرت بعد العمل على الملاحظة السابقة، لذلك المطلوب الآن قياس الأثر لا تكرار نفس الاقتراح.",
+                    "priority": "عالية",
+                    "mode": "follow_up",
+                    "related_previous_code": code,
+                }
+            )
+        else:
+            recommendations.append(
+                {
+                    "code": code,
+                    "title": "إعادة معايرة درجات الأخبار",
+                    "action": "خفض الدرجات القصوى للأخبار غير النهائية وإضافة وزن لحجم الشركة والسيولة والتخفيف.",
+                    "reason": "الدرجة الحالية لا تفسر حركة السعر دائمًا.",
+                    "priority": "عالية",
+                    "mode": "new",
+                }
+            )
+
+    top_errors = stats.get("top_errors") or []
+    if top_errors:
+        errors.extend(
+            {
+                "code": f"error_{index}",
+                "title": item.get("type"),
+                "reason": item.get("type"),
+                "evidence": f"تكرر {item.get('count', 0)} مرات",
+                "severity": "متوسطة",
+            }
+            for index, item in enumerate(top_errors[:3], start=1)
+        )
+
+    if total and not recommendations:
+        recommendations.append(
+            {
+                "code": "monitor_without_change",
+                "title": "الاستمرار في المراقبة دون تعديل جديد",
+                "action": "اجمع بيانات أيام إضافية قبل تعديل القواعد حتى لا يتغير النظام بناءً على عينة صغيرة.",
+                "reason": "لا يوجد خطأ متكرر قوي يبرر تغييرًا جديدًا اليوم.",
+                "priority": "منخفضة",
+                "mode": "monitor",
+            }
+        )
+
+    if not total:
+        summary = "لا توجد إشارات سعرية كافية لإنشاء تقييم تطويري موثوق اليوم."
+    else:
+        summary = (
+            f"تمت مراجعة {total} إشارة. "
+            f"نسبة النجاح الحالية {stats.get('success_rate', 0)}%. "
+            f"ظهر {failure_count} عدم تطابق يحتاج متابعة."
+        )
+
+    return {
+        "date": date_key,
+        "summary": summary,
+        "errors": errors,
+        "recommendations": recommendations,
+        "memory_notes": [],
+        "source": "local",
+    }
+
+
+def _openai_daily_review(
+    date_key: str,
+    stats: dict[str, Any],
+    signals: list[dict[str, Any]],
+    improvements: list[dict[str, Any]],
+    prior_reviews: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not config.OPENAI_API_KEY:
+        return None
+
+    compact_signals = []
+    for record in signals[-120:]:
+        compact_signals.append(
+            {
+                "symbol": record.get("symbol"),
+                "title": record.get("title"),
+                "score": (
+                    record.get("ai_score")
+                    if isinstance(
+                        record.get("ai_score"),
+                        (int, float),
+                    )
+                    else record.get("system_score")
+                ),
+                "recommendation": signal_recommendation(record),
+                "event_status": record.get("event_status"),
+                "price_at_signal": record.get("price_at_signal"),
+                "latest_price": record.get("latest_price"),
+                "highest_change_pct": record.get(
+                    "highest_change_pct"
+                ),
+                "lowest_change_pct": record.get(
+                    "lowest_change_pct"
+                ),
+                "last_change_pct": record.get(
+                    "last_change_pct"
+                ),
+                "result": signal_result(record),
+                "mismatch": signal_mismatch_reason(record),
+            }
+        )
+
+    memory = [
+        {
+            "code": item.get("code"),
+            "title": item.get("title"),
+            "action": item.get("action"),
+            "status": item.get("status"),
+            "first_seen": item.get("first_seen"),
+            "last_seen": item.get("last_seen"),
+            "exported_at": item.get("exported_at"),
+            "implemented_at": item.get("implemented_at"),
+            "times_seen": item.get("times_seen"),
+        }
+        for item in improvements[-100:]
+    ]
+    previous_summaries = [
+        {
+            "date": review.get("date"),
+            "summary": review.get("summary"),
+            "status": review.get("status"),
+            "recommendation_codes": [
+                item.get("code")
+                for item in review.get("recommendations") or []
+            ],
+        }
+        for review in prior_reviews[-30:]
+    ]
+
+    prompt = f"""
+أنت مسؤول تطوير تراكمي لنظام تحليل أخبار الأسهم.
+أنشئ تعليق التطوير اليومي بتاريخ {date_key}.
+
+قواعد الذاكرة الإلزامية:
+1) لا تتعامل مع كل يوم كأنه أول مرة.
+2) لا تكرر اقتراحًا سبق تصديره أو تنفيذه بنفس الصياغة.
+3) إذا استمرت المشكلة بعد تنفيذ اقتراح سابق، اذكر أن التعديل السابق لم يحلها بالكامل، ثم اقترح اختبارًا أو خطوة متابعة مختلفة.
+4) فرّق بين خطأ في تقييم الخبر وخطأ سببه السوق أو السيولة أو التخفيف أو أن الخبر كان مسعرًا.
+5) لا تقترح توسيع الكلمات المفتاحية إذا كانت الذاكرة تقول إن ذلك نُفذ، إلا كمتابعة لقياس الفئات التي ما زالت مفقودة.
+6) اعتمد على الأدلة الرقمية، وتجنب التوصيات العامة المتكررة.
+
+أعد JSON فقط:
+{{
+  "summary": "تعليق يومي واضح من 3 إلى 6 جمل",
+  "errors": [
+    {{
+      "code": "رمز ثابت بالإنجليزية",
+      "title": "اسم الخطأ بالعربية",
+      "reason": "السبب المحتمل",
+      "evidence": "الدليل الرقمي أو الأمثلة",
+      "severity": "عالية أو متوسطة أو منخفضة"
+    }}
+  ],
+  "recommendations": [
+    {{
+      "code": "رمز ثابت بالإنجليزية",
+      "title": "عنوان التحسين",
+      "action": "إجراء عملي محدد",
+      "reason": "لماذا يلزم",
+      "priority": "عالية أو متوسطة أو منخفضة",
+      "mode": "new أو follow_up أو monitor",
+      "related_previous_code": "رمز سابق عند الحاجة"
+    }}
+  ],
+  "memory_notes": [
+    "ماذا تم سابقًا وكيف أثر على قرار اليوم"
+  ]
+}}
+
+الإحصائيات:
+{json.dumps(stats, ensure_ascii=False)}
+
+الإشارات:
+{json.dumps(compact_signals, ensure_ascii=False)}
+
+ذاكرة التحسينات السابقة:
+{json.dumps(memory, ensure_ascii=False)}
+
+ملخصات الأيام السابقة:
+{json.dumps(previous_summaries, ensure_ascii=False)}
+"""
+
+    try:
+        response = requests.post(
+            config.OPENAI_URL,
+            headers={
+                "Authorization": (
+                    f"Bearer {config.OPENAI_API_KEY}"
+                ),
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": config.OPENAI_MODEL,
+                "input": prompt,
+                "temperature": 0.1,
+            },
+            timeout=90,
+        )
+
+        if not response.ok:
+            return None
+
+        data = response.json()
+        result = parse_json_object(
+            extract_response_text(data)
+        )
+        if not result:
+            return None
+
+        record_usage(
+            data,
+            f"daily_development:{date_key}",
+        )
+        result["date"] = date_key
+        result["source"] = "openai"
+        return result
+
+    except Exception:
+        return None
+
+
+
+def _apply_cumulative_memory(
+    review: dict[str, Any],
+    improvements: list[dict[str, Any]],
+    date_key: str,
+) -> dict[str, Any]:
+    """يمنع تكرار الاقتراح كأنه جديد ويحوّله إلى متابعة عند الحاجة."""
+    by_code = {
+        str(item.get("code")): item
+        for item in improvements
+    }
+    memory_notes = list(review.get("memory_notes") or [])
+    cleaned: list[dict[str, Any]] = []
+
+    for recommendation in review.get("recommendations") or []:
+        original_code = _normalize_issue_code(
+            recommendation.get("code")
+            or recommendation.get("title")
+        )
+        recommendation["code"] = original_code
+        existing = by_code.get(original_code)
+
+        if not existing:
+            cleaned.append(recommendation)
+            continue
+
+        status = str(existing.get("status") or "pending")
+
+        if status == "pending":
+            memory_notes.append(
+                f"الاقتراح «{existing.get('title')}» موجود مسبقًا وما زال معلقًا؛ لم يُضف كاقتراح جديد."
+            )
+            continue
+
+        follow_code = f"{original_code}_effect_check"
+        follow_existing = by_code.get(follow_code)
+
+        if follow_existing:
+            memory_notes.append(
+                f"تم العمل سابقًا على «{existing.get('title')}»، ومتابعة أثره مسجلة بالفعل بحالة {follow_existing.get('status')}."
+            )
+            continue
+
+        previous_action = clean_text(
+            existing.get("latest_action")
+            or existing.get("action")
+        )
+        recommendation = dict(recommendation)
+        recommendation["code"] = follow_code
+        recommendation["mode"] = "follow_up"
+        recommendation["related_previous_code"] = original_code
+        recommendation["title"] = (
+            f"قياس أثر التحسين السابق: "
+            f"{existing.get('title') or recommendation.get('title')}"
+        )
+        recommendation["action"] = (
+            "لا تكرر الإجراء السابق. "
+            "قارن الأداء قبل التنفيذ وبعده، وحدد سبب استمرار المشكلة، "
+            "ثم اختبر تعديلًا مختلفًا قائمًا على النتائج. "
+            f"الإجراء السابق كان: {previous_action}"
+        )
+        recommendation["reason"] = (
+            "المشكلة ظهرت مجددًا رغم أن الملاحظة السابقة "
+            f"حالتها «{status}»، ولذلك تحولت إلى متابعة أثر."
+        )
+        cleaned.append(recommendation)
+        memory_notes.append(
+            f"لم يُكرر الاقتراح {original_code}؛ تم تحويله إلى متابعة أثر مرتبطة به."
+        )
+
+    review["recommendations"] = cleaned
+    review["memory_notes"] = memory_notes
+    return review
+
+
+def _merge_review_into_registry(
+    review: dict[str, Any],
+) -> list[dict[str, Any]]:
+    registry = load_improvements()
+    by_code = {
+        str(item.get("code")): item
+        for item in registry
+    }
+    date_key = str(review.get("date"))
+
+    for recommendation in review.get("recommendations") or []:
+        code = _normalize_issue_code(
+            recommendation.get("code")
+            or recommendation.get("title")
+        )
+        recommendation["code"] = code
+        existing = by_code.get(code)
+
+        if existing:
+            existing["last_seen"] = date_key
+            existing["times_seen"] = int(
+                existing.get("times_seen", 1)
+            ) + 1
+            existing["latest_reason"] = recommendation.get(
+                "reason"
+            )
+            existing["latest_action"] = recommendation.get(
+                "action"
+            )
+            sources = existing.setdefault("source_dates", [])
+            if date_key not in sources:
+                sources.append(date_key)
+            continue
+
+        item = {
+            "code": code,
+            "title": recommendation.get("title"),
+            "action": recommendation.get("action"),
+            "reason": recommendation.get("reason"),
+            "priority": recommendation.get(
+                "priority",
+                "متوسطة",
+            ),
+            "mode": recommendation.get("mode", "new"),
+            "related_previous_code": recommendation.get(
+                "related_previous_code"
+            ),
+            "status": "pending",
+            "first_seen": date_key,
+            "last_seen": date_key,
+            "times_seen": 1,
+            "source_dates": [date_key],
+            "created_at": datetime.now(RIYADH).isoformat(),
+        }
+        registry.append(item)
+        by_code[code] = item
+
+    save_json(config.IMPROVEMENTS_FILE, registry)
+    return registry
+
+
+def generate_daily_development_review(
+    force: bool = False,
+    date_key: str | None = None,
+) -> dict[str, Any]:
+    date_key = date_key or datetime.now(RIYADH).date().isoformat()
+    reviews = load_daily_reviews()
+
+    for review in reviews:
+        if _review_date(review) == date_key and not force:
+            return review
+
+    stats = calculate_statistics(days=30)
+    signals = load_json(config.SIGNALS_FILE, [])
+    improvements = load_improvements()
+
+    generated = _openai_daily_review(
+        date_key,
+        stats,
+        signals,
+        improvements,
+        reviews,
+    )
+    if generated is None:
+        generated = _local_daily_review(
+            date_key,
+            stats,
+            improvements,
+        )
+
+    generated = _apply_cumulative_memory(
+        generated,
+        improvements,
+        date_key,
+    )
+    generated["date"] = date_key
+    generated["created_at"] = datetime.now(RIYADH).isoformat()
+    generated["status"] = "pending"
+    generated["stats_snapshot"] = stats
+
+    if force:
+        reviews = [
+            item
+            for item in reviews
+            if _review_date(item) != date_key
+        ]
+
+    reviews.append(generated)
+    reviews.sort(
+        key=lambda item: item.get("date") or ""
+    )
+    save_json(config.DAILY_REVIEWS_FILE, reviews[-1000:])
+    _merge_review_into_registry(generated)
+    return generated
+
+
+def mark_improvement_status(
+    code: str,
+    status: str,
+    note: str = "",
+) -> bool:
+    allowed = {
+        "pending",
+        "exported",
+        "implemented",
+        "monitoring",
+        "closed",
+    }
+    if status not in allowed:
+        raise ValueError("حالة التحسين غير صحيحة.")
+
+    items = load_improvements()
+    changed = False
+
+    for item in items:
+        if str(item.get("code")) != str(code):
+            continue
+
+        item["status"] = status
+        item["status_note"] = clean_text(note)
+        item["status_updated_at"] = datetime.now(
+            RIYADH
+        ).isoformat()
+
+        if status == "implemented":
+            item["implemented_at"] = item[
+                "status_updated_at"
+            ]
+        if status == "exported":
+            item["exported_at"] = item[
+                "status_updated_at"
+            ]
+
+        changed = True
+        break
+
+    if changed:
+        save_json(config.IMPROVEMENTS_FILE, items)
+
+    return changed
+
+
+def development_dashboard() -> dict[str, Any]:
+    reviews = load_daily_reviews()
+    improvements = load_improvements()
+    pending_reviews = [
+        item
+        for item in reviews
+        if item.get("status") == "pending"
+    ]
+    processed_reviews = [
+        item
+        for item in reviews
+        if item.get("status") in (
+            "exported",
+            "processed",
+        )
+    ]
+    pending_improvements = [
+        item
+        for item in improvements
+        if item.get("status") == "pending"
+    ]
+
+    return {
+        "days_recorded": len(reviews),
+        "days_processed": len(processed_reviews),
+        "days_pending": len(pending_reviews),
+        "pending_improvements": len(
+            pending_improvements
+        ),
+        "reviews": sorted(
+            reviews,
+            key=lambda item: item.get("date") or "",
+            reverse=True,
+        ),
+        "improvements": sorted(
+            improvements,
+            key=lambda item: item.get(
+                "last_seen",
+                "",
+            ),
+            reverse=True,
+        ),
+    }
+
+
+def _development_txt(
+    reviews: list[dict[str, Any]],
+    improvements: list[dict[str, Any]],
+    exported_at: str,
+) -> str:
+    lines = [
+        "برق نيوز — سجل التطوير التراكمي بالذكاء الاصطناعي",
+        "=" * 64,
+        f"وقت التصدير: {format_saudi_time(exported_at)}",
+        f"عدد الأيام: {len(reviews)}",
+        f"عدد التحسينات في الذاكرة: {len(improvements)}",
+        "",
+        "ذاكرة التحسينات التراكمية",
+        "-" * 64,
+    ]
+
+    for item in improvements:
+        lines.extend(
+            [
+                f"الرمز: {item.get('code')}",
+                f"العنوان: {item.get('title')}",
+                f"الحالة: {item.get('status')}",
+                f"الأولوية: {item.get('priority')}",
+                f"الإجراء: {item.get('action')}",
+                f"السبب: {item.get('reason')}",
+                f"أول ظهور: {item.get('first_seen')}",
+                f"آخر ظهور: {item.get('last_seen')}",
+                f"عدد مرات الرصد: {item.get('times_seen', 1)}",
+                f"ملاحظة الحالة: {item.get('status_note', '')}",
+                "",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "التعليقات اليومية",
+            "=" * 64,
+        ]
+    )
+
+    for review in sorted(
+        reviews,
+        key=lambda item: item.get("date") or "",
+    ):
+        lines.extend(
+            [
+                "",
+                f"التاريخ: {review.get('date')}",
+                f"الحالة عند التصدير: {review.get('status')}",
+                f"المصدر: {review.get('source')}",
+                "",
+                "التعليق اليومي:",
+                clean_text(review.get("summary")),
+                "",
+                "الأخطاء المرصودة:",
+            ]
+        )
+
+        errors = review.get("errors") or []
+        if not errors:
+            lines.append("- لا توجد أخطاء قوية مرصودة.")
+
+        for error in errors:
+            lines.extend(
+                [
+                    f"- [{error.get('severity', '—')}] {error.get('title')}",
+                    f"  الرمز: {error.get('code')}",
+                    f"  السبب: {error.get('reason')}",
+                    f"  الدليل: {error.get('evidence')}",
+                ]
+            )
+
+        lines.append("")
+        lines.append("التحسينات المقترحة:")
+
+        recommendations = review.get(
+            "recommendations"
+        ) or []
+        if not recommendations:
+            lines.append("- لا توجد تحسينات جديدة.")
+
+        for rec in recommendations:
+            lines.extend(
+                [
+                    f"- [{rec.get('priority', '—')}] {rec.get('title')}",
+                    f"  الرمز: {rec.get('code')}",
+                    f"  النوع: {rec.get('mode')}",
+                    f"  الإجراء: {rec.get('action')}",
+                    f"  السبب: {rec.get('reason')}",
+                    (
+                        f"  مرتبط بتحسين سابق: "
+                        f"{rec.get('related_previous_code')}"
+                        if rec.get("related_previous_code")
+                        else ""
+                    ),
+                ]
+            )
+
+        memory_notes = review.get("memory_notes") or []
+        if memory_notes:
+            lines.append("")
+            lines.append("ملاحظات الذاكرة:")
+            lines.extend(
+                f"- {clean_text(note)}"
+                for note in memory_notes
+            )
+
+        lines.extend(
+            [
+                "",
+                "-" * 64,
+            ]
+        )
+
+    return "\n".join(
+        line
+        for line in lines
+        if line is not None
+    )
+
+
+def export_pending_development_txt(limit: int | None = None) -> dict[str, Any]:
+    reviews = load_daily_reviews()
+    pending = sorted(
+        [
+            item
+            for item in reviews
+            if item.get("status") == "pending"
+        ],
+        key=lambda item: item.get("date") or "",
+    )
+
+    if limit is not None:
+        pending = pending[: max(1, int(limit))]
+
+    if not pending:
+        return {
+            "text": "",
+            "filename": "",
+            "count": 0,
+            "message": "لا توجد ملاحظات معلقة للتصدير.",
+        }
+
+    exported_at = datetime.now(RIYADH).isoformat()
+    pending_dates = {
+        str(item.get("date"))
+        for item in pending
+    }
+    improvements = load_improvements()
+
+    text = _development_txt(
+        pending,
+        improvements,
+        exported_at,
+    )
+    filename = (
+        "barq_ai_development_"
+        f"{datetime.now(RIYADH).strftime('%Y%m%d_%H%M')}.txt"
+    )
+
+    for review in reviews:
+        if str(review.get("date")) in pending_dates:
+            review["status"] = "exported"
+            review["exported_at"] = exported_at
+
+    for item in improvements:
+        source_dates = {
+            str(date)
+            for date in item.get("source_dates") or []
+        }
+        if (
+            item.get("status") == "pending"
+            and source_dates.intersection(pending_dates)
+        ):
+            item["status"] = "exported"
+            item["exported_at"] = exported_at
+            item["status_note"] = (
+                "تم تضمين الملاحظة في ملف التطوير النصي."
+            )
+
+    history = load_json(
+        config.EXPORT_HISTORY_FILE,
+        [],
+    )
+    history.append(
+        {
+            "exported_at": exported_at,
+            "filename": filename,
+            "review_dates": sorted(pending_dates),
+            "count": len(pending),
+        }
+    )
+
+    save_json(config.DAILY_REVIEWS_FILE, reviews)
+    save_json(config.IMPROVEMENTS_FILE, improvements)
+    save_json(
+        config.EXPORT_HISTORY_FILE,
+        history[-1000:],
+    )
+
+    return {
+        "text": text,
+        "filename": filename,
+        "count": len(pending),
+        "message": (
+            f"تم تجهيز {len(pending)} يومًا "
+            "وتحويلها إلى حالة تم العمل على الملاحظات."
+        ),
+    }
+
+
+def export_all_development_txt() -> dict[str, Any]:
+    reviews = load_daily_reviews()
+    improvements = load_improvements()
+    exported_at = datetime.now(RIYADH).isoformat()
+    text = _development_txt(
+        reviews,
+        improvements,
+        exported_at,
+    )
+    return {
+        "text": text,
+        "filename": (
+            "barq_ai_development_full_"
+            f"{datetime.now(RIYADH).strftime('%Y%m%d_%H%M')}.txt"
+        ),
+        "count": len(reviews),
+        "message": "تم تجهيز السجل التراكمي كاملًا.",
+    }
